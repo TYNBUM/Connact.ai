@@ -173,4 +173,4 @@ See [docs/verification.md](docs/verification.md) for the exact verification scop
 
 ## Project Naming and Design Documents
 
-Product name is uniformly **Connact.ai**. See [Naming Guidelines](docs/naming.md); the latest [Design Delivery Package](outputs/connact-ai-design-package/README.md) includes Word, Demo, feature list, and four-phase Prompts.
+Product name is uniformly **Connact.ai**. See [Naming Guidelines](docs/naming.md); the latest [Design Delivery Package](outputs/connact-ai-design-package/README.md) includes Word, a bilingual offline Demo, the feature roadmap, and four phased prompts. A complete Chinese-language snapshot is retained at `outputs/connact-ai-design-package-zh-CN.zip`.

@@ -9,7 +9,7 @@ This package contains design documents and an offline interactive demo for phase
 | File | Purpose |
 | --- | --- |
 | connact-ai-detailed-design.docx | 18-page detailed design, including AI writing interaction, evidence, versions and variables, page layout, technical architecture, interfaces, subsequent sending, and acceptance |
-| connact-ai-workflow-demo.html | Offline demo that can be opened directly in a browser, including product flow, exception scenarios, technical architecture tracking, and four-phase Prompts |
+| connact-ai-workflow-demo.html | Bilingual English/Simplified Chinese offline demo, including product flow, exception scenarios, technical architecture tracking, and four-phase Prompts |
 | connact-ai-feature-roadmap.xlsx | 7 worksheets, 58 phased features, 9 Soon management to-dos, 22 acceptance scenarios, AI writing steps, 15 interfaces/contracts, and four-phase complete Prompts |
 | prompt-01-mvp.md | Phase 1: Resume, People Search, Contact, AI Writing, Preview, and Draft |
 | prompt-02-mailboxes-send.md | Phase 2: Account isolation, multiple Gmail mailboxes, single-email testing, sending, and scheduling |
@@ -19,6 +19,7 @@ This package contains design documents and an offline interactive demo for phase
 ## Recommended Reading and Usage Order
 
 1. Extract and keep all files in the same directory. Open the HTML file in a browser; no dependencies or internet connection are required.
+   Use the language button in the upper-right corner to switch the complete demo, roadmap data, and embedded prompts between English and Simplified Chinese.
 2. Confirm the fictional examples in Personas, save Maya in People Search, then click Write. You can write the body manually first, then generate suggestions, observing that the body is not overwritten.
 3. Adopt the suggestions and preview, test the "Missing Name" and "Suggestion Expired" scenarios; switch the top Workflow / Architecture to view the logic.
 4. The top Phase 2–4 only changes the scope of the demo, showing simulated interactions for connections, inbox, and campaigns, which do not represent that these services are completed. Simulated reminder expiration does not send emails.
@@ -32,6 +33,10 @@ The feature count, completed count, and completion rate in "Phase Overview" are 
 The "Feature List" can filter by phase, module, and status, with frozen headers and requirement IDs. The light yellow implementation status, verification level, and verification evidence are used for updates during development. Mock and real verification are recorded separately.
 
 The "Phase Prompts" save all the body text; after filtering by phase, copy the text in paragraph order. A more convenient way is to directly copy the independent Markdown files.
+
+## Chinese Backup
+
+The repository also retains `outputs/connact-ai-design-package-zh-CN.zip`, a complete Chinese-language snapshot created before the English documentation conversion.
 
 ## Confirmed Scope
 
