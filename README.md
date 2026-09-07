@@ -1,4 +1,4 @@
-# Connact.ai · 金融人脉与邮件写作工作台
+# Connact.ai
 
 第一阶段可运行 MVP。Next.js / React / TypeScript / Tiptap + FastAPI / SQLAlchemy / Alembic + PostgreSQL。
 
