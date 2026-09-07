@@ -1,67 +1,67 @@
-# Connact.ai 设计交付包
+# Connact.ai Design Delivery Package
 
-版本 1.1 · 2026 年 9 月 6 日
+Version 1.1 · September 6, 2026
 
-这是一套用于启动分期开发的设计文件与离线交互演示，尚未开发真实产品后端，未连接实际 Apollo、AI 模型或 Gmail。
+This package contains design documents and an offline interactive demo for phased development. It is not a deployed backend, and the package itself does not connect to Apollo, an AI model, or Gmail.
 
-## 文件
+## Files
 
-| 文件 | 用途 |
+| File | Purpose |
 | --- | --- |
-| connact-ai-detailed-design.docx | 18 页详细设计，包含 AI 写作交互、证据、版本与变量、页面布局、技术架构、接口、后续发送及验收 |
-| connact-ai-workflow-demo.html | 可直接在浏览器打开的离线演示，包含产品流程、异常场景、技术架构追踪及四期 Prompt |
-| connact-ai-feature-roadmap.xlsx | 7 个工作表，58 项分期功能和 9 项 Soon 管理待办、22 个验收场景、AI 写作步骤、15 项接口/契约及四期完整 Prompt |
-| prompt-01-mvp.md | 第一期：简历、找人、联系人、AI 写作、预览和草稿 |
-| prompt-02-mailboxes-send.md | 第二期：账户隔离、多 Gmail、单封测试/正式/定时发送 |
-| prompt-03-inbox-followup.md | 第三期：收件箱、原会话回复、手动跟进与排期保护 |
-| prompt-04-campaigns-polish.md | 第四期：批量活动、模板、统计、设置及 Academic 契约 |
+| connact-ai-detailed-design.docx | 18-page detailed design, including AI writing interaction, evidence, versions and variables, page layout, technical architecture, interfaces, subsequent sending, and acceptance |
+| connact-ai-workflow-demo.html | Offline demo that can be opened directly in a browser, including product flow, exception scenarios, technical architecture tracking, and four-phase Prompts |
+| connact-ai-feature-roadmap.xlsx | 7 worksheets, 58 phased features, 9 Soon management to-dos, 22 acceptance scenarios, AI writing steps, 15 interfaces/contracts, and four-phase complete Prompts |
+| prompt-01-mvp.md | Phase 1: Resume, People Search, Contact, AI Writing, Preview, and Draft |
+| prompt-02-mailboxes-send.md | Phase 2: Account isolation, multiple Gmail mailboxes, single-email testing, sending, and scheduling |
+| prompt-03-inbox-followup.md | Phase 3: Inbox, Original Conversation Reply, Manual Follow-up, and Scheduling Protection |
+| prompt-04-campaigns-polish.md | Phase 4: Batch Campaigns, Templates, Statistics, Settings, and Academic Contract |
 
-## 建议阅读和使用顺序
+## Recommended Reading and Usage Order
 
-1. 解压并保留所有文件在同一目录。用浏览器打开 HTML；不需要安装依赖或联网。
-2. 在 Personas 确认虚构示例，进入 People Search 保存 Maya，再点击 Write。可以先手写正文，再生成建议，观察正文不被覆盖。
-3. 采纳建议并预览，试用“姓名缺失”和“建议过期”场景；切换顶部 Workflow / Architecture 查看逻辑。
-4. 顶部 Phase 2–4 只改变演示范围，展示连接、收件箱和活动的模拟交互，不代表这些服务已经完成。模拟提醒到期不会发信。
-5. 阅读 Word 第 03–07 节的 AI 写作设计，再在 Excel 按期次筛选功能。
-6. 从 prompt-01-mvp.md 开始，每期把对应 prompt 放入同一代码库的新开发任务。下一期先读取现有代码及上一期验收结果，避免重建项目。
+1. Extract and keep all files in the same directory. Open the HTML file in a browser; no dependencies or internet connection are required.
+2. Confirm the fictional examples in Personas, save Maya in People Search, then click Write. You can write the body manually first, then generate suggestions, observing that the body is not overwritten.
+3. Adopt the suggestions and preview, test the "Missing Name" and "Suggestion Expired" scenarios; switch the top Workflow / Architecture to view the logic.
+4. The top Phase 2–4 only changes the scope of the demo, showing simulated interactions for connections, inbox, and campaigns, which do not represent that these services are completed. Simulated reminder expiration does not send emails.
+5. Read the AI Writing Design in Word Sections 03–07, then filter by phase in Excel.
+6. Start with prompt-01-mvp.md, and place the corresponding prompt in a new development task in the same codebase. For the next phase, first read the existing code and the acceptance results from the previous phase to avoid rebuilding the project.
 
-## Excel 使用方式
+## Excel Usage
 
-“分期总览”中的功能数、已完成数量和完成率来自“功能清单”的公式。初始实施状态为“未开始”，验证级别为“未验证”，并非宣称已开发。
+The feature count, completed count, and completion rate in "Phase Overview" are calculated from formulas in "Feature List." The initial implementation status is "Not Started," and the verification level is "Unverified"; neither indicates completed development.
 
-“功能清单”可筛选期次、模块和状态，冻结表头与需求 ID。淡黄色的实施状态、验证级别和验证证据用于开发期间更新。Mock 与真实验证分开记录。
+The "Feature List" can filter by phase, module, and status, with frozen headers and requirement IDs. The light yellow implementation status, verification level, and verification evidence are used for updates during development. Mock and real verification are recorded separately.
 
-“分期Prompt”保存全部正文；按期次筛选后依段落顺序复制。更方便的方式是直接复制独立 Markdown 文件。
+The "Phase Prompts" save all the body text; after filtering by phase, copy the text in paragraph order. A more convenient way is to directly copy the independent Markdown files.
 
-## 已确认范围
+## Confirmed Scope
 
-个人工作区支持多个 Gmail；架构预留团队，当前不开发团队协作。英文界面默认，可切换简体中文，邮件语言独立。Finance 为核心，Academic 只留入口和可替换数据源契约。四期都不开发自动邮件序列。
+A personal workspace supports multiple Gmail mailboxes. The architecture reserves room for teams, but team collaboration is not included. English is the default interface language, with Simplified Chinese available as an option; email language is controlled independently. Finance is the core domain, while Academic remains an entry point backed by a replaceable data-source contract. None of the four phases includes automated email sequences.
 
-账户与登录安排在第二期，在真实 Gmail 数据接入之前完成。第一期采用本地固定工作区模式，不作为公开部署认证方案。第四期只完善设置，不推迟基础身份隔离。
+Accounts and login are scheduled for Phase 2 and are completed before real Gmail data is integrated. Phase 1 uses a local fixed workspace mode and is not considered a public deployment certification solution. Phase 4 only refines settings and does not delay basic identity isolation.
 
-## 本交付包的验证范围
+## Verification Scope of This Delivery Package
 
-- Word 已完成中文字体修正、渲染和逐页检查。
-- XLSX 已检查 7 张表的视觉输出、分期公式、筛选表、状态下拉与冻结窗格；公式错误扫描没有发现错误。
-- HTML 已在桌面和 1024、736、390 px 宽度验证，未发现横向页面溢出或 JavaScript 错误；验证过程中无外部网络请求。
-- 演示验证包括筛选、重复保存、生成不覆盖原稿、采纳、变量预览、缺失变量阻断、过期建议阻断、联系人间草稿隔离、刷新恢复、模拟测试发信、只提醒不发信及 Prompt 查看。
+- Word has completed Chinese font correction, rendering, and page-by-page checks.
+- XLSX has been checked for visual output of 7 tables, phased formulas, filtered tables, dropdowns for status, and frozen panes; formula error scanning found no errors.
+- HTML has been validated on desktop and widths of 1024, 736, and 390 px, with no horizontal page overflow or JavaScript errors found; no external network requests were made during validation.
+- Demo validation includes filtering, repeated saving, generation without overwriting the original draft, adoption, variable preview, missing variable blocking, expired suggestion blocking, draft isolation between contacts, refresh recovery, simulated test sending, only reminders without sending, and Prompt viewing.
 
-HTML 的简历选择仅记录文件名；示例解析和写作使用虚构固定数据。富文本、服务端保存、OAuth 和真实发送仍属于后续产品实现。本包不包含真实 API 调用、真实投递或真实回复同步的验收证明。
+The HTML demo records only the selected resume file name; its parsing and writing examples use fixed fictional data. Rich-text editing, server-side persistence, OAuth, and live sending remain product implementation work. This package does not provide proof of live API calls, delivery, or reply synchronization.
 
-重置演示会清除该演示保存于当前浏览器的状态。浏览器禁用本地存储时，仍可在当前会话查看演示；复制权限不可用时会显示文本供手动复制。
+Resetting the demo will clear the state saved in the current browser. If the browser disables local storage, the demo can still be viewed during the current session; if copy permissions are unavailable, text will be displayed for manual copying.
 
-## Soon 管理员后端
+## Soon Administrator Backend
 
-管理员后端已列入 Soon，具体期次和日期待定，不计入 P1–P4 交付门槛。HTML 左侧 Admin Console 和分期页可查看九个页面范围；Word 第 17 节与 Excel 的 Soon 筛选同步记录。当前只做入口占位和规划，未实现管理功能。四份 Prompt 已补充同一范围边界。
+The administrator backend has been included in Soon, with specific phases and dates to be determined, and is not counted toward the P1–P4 delivery milestones. The HTML left-side Admin Console and phased pages can view the scope of nine pages; Word Section 17 and Excel's Soon filter are synchronized. Currently, only entry placeholders and planning are done, and management functions are not implemented. The four Prompts have been supplemented with the same scope boundaries.
 
-## Apollo 与 LinkedIn 协同说明
+## Apollo and LinkedIn Collaboration Notes
 
-Apollo 提供结构化人员搜索与按需邮箱补充；SerpAPI 通过 Google 检索 LinkedIn 公开档案，补充职业背景线索。Apollo 的姓名、机构或档案 URL 用于定位 LinkedIn；核对后的 LinkedIn 信息反向辅助 Apollo 匹配与补充。两路结果关联同一 Contact，分别保留来源、时间与冲突。搜索摘要只能标为待核实线索，不能自动认定同一人、覆盖字段或用于校友陈述。这是双源协同的目标设计：当前 MVP 仍使用通用 Google 查询，尚未实现 LinkedIn 定向检索、反向匹配及自动交叉核验。
+Apollo provides structured people search and on-demand email enrichment; SerpAPI retrieves LinkedIn public profiles via Google search, supplementing career background clues. Apollo's name, organization, or profile URL is used to locate LinkedIn; verified LinkedIn information is used to assist Apollo in matching and enrichment. Results from both sources are associated with the same Contact, with sources, timestamps, and conflicts preserved separately. Search summaries can only be marked as unverified clues and cannot automatically confirm the same person, overwrite fields, or be used for alumni statements. This is the target design of dual-source collaboration: the current MVP still uses a general Google query and has not yet implemented LinkedIn-directed search, reverse matching, or automatic cross-verification.
 
-Demo 的 People Search 页面新增协同说明与“查看双源示例”；Word 第 02、09 节、功能清单 P1-09 至 P1-12、验收 T03 和第一期 Prompt 已同步。SerpAPI 经 Google Search API 检索 LinkedIn 公开页，不表示已接入 LinkedIn 官方 API。参考：https://serpapi.com/search-api
+The People Search page in the demo has added collaboration notes and a "View Dual-Source Example"; Word Sections 02, 09, the Feature List P1-09 to P1-12, Acceptance T03, and the first-phase Prompt have been synchronized. SerpAPI searches LinkedIn public pages via Google Search API, which does not indicate that LinkedIn's official API has been integrated. Reference: https://serpapi.com/search-api
 
-## 项目命名
+## Project Naming
 
-对外产品名称统一为 **Connact.ai**，大小写和小数点固定。文档、Demo、API 标题和开发 Prompt 使用同一名称。交付文件及目录使用 `connact-ai-` 前缀；四期 Prompt 沿用 `prompt-01-…` 至 `prompt-04-…` 的编号规则。
+The external product name is uniformly **Connact.ai**, with fixed capitalization and decimal points. Document, Demo, API titles, and development Prompts use the same name. Delivery files and directories use the `connact-ai-` prefix; the four-phase Prompts follow the `prompt-01-…` to `prompt-04-…` numbering rule.
 
-仓库目录 `coldemail`、现有数据库/数据库用户 `meridian`、测试数据库 `meridian_test`、内部包名 `meridian-workspace`、容器用户及浏览器存储键属于兼容标识，保留原值，不作为产品名称展示。改产品名称不要求迁移数据库或清空用户数据。
+The repository directory `coldemail`, existing database/database user `meridian`, test database `meridian_test`, internal package name `meridian-workspace`, container user, and browser storage key are compatibility identifiers, retained with original values, and not displayed as product names. Changing the product name does not require database migration or clearing user data.

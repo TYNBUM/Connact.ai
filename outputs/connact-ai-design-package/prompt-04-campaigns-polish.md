@@ -1,21 +1,21 @@
-请开发 Connact.ai 第 4 期：批量活动模板与统计。
+Please develop Connact.ai Phase 4: Batch Campaign Templates and Statistics.
 
-已确认约束：个人工作区可连接多个 Gmail，团队仅预留；默认英文界面并支持简体中文，邮件语言独立；Finance 是核心，Academic 仅占位与契约；四期均不做自动序列。所有模块独立可用，不强制分步向导。不要把 Mock 或 HTML 演示当作真实集成。
-管理员后端已列为 Soon 待排期，不属于 P1–P4 的实现范围；只保留 Coming Soon 入口与范围说明，不开放真实管理操作。平台管理员与个人工作区 Owner 是不同角色。
-先检查工作区、AGENTS.md 和已实现代码，给出简短实施顺序后直接开发。延续已有数据和模块，不重建整个项目。第三方能力查当前官方文档；没有凭据可显式 Mock，真实失败不能偷偷回退模拟。交付代码、迁移、启动说明、关键验证及真实未验证项。涉及真实发信仅用用户指定测试收件人。
+Confirmed constraints: Personal workspaces can connect to multiple Gmail mailboxes; team support is reserved for future work. English is the default interface language, with Simplified Chinese available as an option; email language is controlled independently. Finance is the core domain, while Academic remains a placeholder and provider contract. No phase includes automated email sequences. Every module must remain independently accessible; do not force users through a step-by-step wizard. Do not present Mock behavior or the HTML demo as a live integration.
+Admin backend has been listed as Soon to be scheduled, not within the scope of P1–P4 implementation; only retain Coming Soon entry and scope description, no real management operations are open. Platform admin and personal workspace Owner are different roles.
+First inspect the workspace, AGENTS.md, and existing implementation, then provide a short implementation order and proceed with development. Extend the current data model and modules instead of rebuilding the project. Verify third-party capabilities against current official documentation. When credentials are unavailable, use an explicitly labeled Mock; live failures must never silently fall back to simulated success. Deliver code, migrations, startup instructions, key verification results, and a clear list of live items that remain unverified. Any live sending must use only test recipients specified by the user.
 
-在前三期代码上开发第四期：批量活动、模板/Snippet 管理、基础统计、设置完善与 Academic 契约。当前仍不开发自动邮件序列、团队协作、计费或 Outlook 真实接入。
+Develop Phase 4 on top of the first three phases: batch campaigns, template and snippet management, basic analytics, settings refinement, and the Academic provider contract. Automated email sequences, team collaboration, billing, and a live Outlook integration remain out of scope.
 
-Campaign 定义：一批用户明确批准的独立邮件；没有首封后自动产生第二封的能力。保存 CampaignRecipient 的联系人、画像版本、内容快照、邮箱、时间和结果。
+Campaign definition: a batch of users who have explicitly approved independent emails; no capability to automatically send a second email after the first. Save CampaignRecipient contact, persona version, content snapshot, email, time, and result.
 
-用户选择名单后逐人生成并预览邮件，统一显示缺失变量、重复联系人、无邮箱、屏蔽、附件、限额和时间问题。允许明确排除异常人，不能静默跳过。用户批准后逐人分别发送，不使用群体 To/CC。复用二期调度、幂等和三期回复保护。
+After user selects a list, generate and preview emails individually, displaying missing variables, duplicate contacts, no email, blocked, attachments, limits, and time issues. Allow explicit exclusion of problematic contacts, cannot silently skip. After user approval, send individually to each contact, not using group To/CC. Reuse phase two scheduling, idempotency, and phase three reply protection.
 
-支持活动暂停/恢复/终止、单人退出、部分失败和进度。恢复重新计算合法窗口，不瞬间补发逾期任务。重试 unknown 先核对，禁止无脑重发。内容批准后模板更新不影响既有任务。
+Support campaign pause/resume/termination, individual exit, partial failure, and progress. Resume recalculates the valid window, not instantly resending overdue tasks. Retry unknowns must be verified first, no blind resending. Template updates after content approval do not affect existing tasks.
 
-Templates/Snippets：Finance 分类、创建/编辑/版本/归档；Academic 仅示例分类。批量 AI 使用与一期一致的事实和人工采纳规则，不在后台临时编造个性化内容。
+Templates/Snippets: Finance classification, create/edit/version/archive; Academic only example classification. Batch AI uses the same facts and manual adoption rules as phase one, no temporary personalization content is generated in the backend.
 
-Analytics：正式发送邮件数和去重人数、人工回复人数、已检测退信、退订、活动进度和手动任务。明确事件、时间窗、分母及去重口径。测试和Mock独立，不造送达/打开/点击率。完善配置、数据导出/删除、错误和中英文文案。
+Analytics: number of officially sent emails and deduplicated users, number of manual replies, detected bounces, unsubscribes, campaign progress, and manual tasks. Clearly define events, time windows, denominator, and deduplication criteria. Testing and Mock are independent, no fabricated delivery/open/click rates. Improve configuration, data export/deletion, errors, and Chinese/English copy.
 
-Academic：保持 Coming Soon；设计学术画像及 Mentor 扩展、候选列表与共享模块关联。实现 MentorDataProvider/MentorMatchingProvider 契约测试，预留 JSONL/SQLite/Postgres/External 注册骨架。未实现返回明确 Unavailable，不伪造导师或空成功结果。
+Academic: Keep Coming Soon; design academic personas and Mentor extensions, candidate lists, and link with shared modules. Implement MentorDataProvider/MentorMatchingProvider contract tests, reserve JSONL/SQLite/Postgres/External registration skeletons. Return Unavailable explicitly if not implemented, no fake mentors or empty success results.
 
-验收：逐人预览与发出内容一致；重复启动不重复发；暂停/退出/回复/退订生效；统计可从事件核对。完成四期回归、运行文档、真实验证记录和公开上线外部事项清单。不要把完成设计文档或演示当作产品已完成。
+Acceptance: Preview and sent content must be consistent per user; repeated starts do not result in repeated sends; pause/exit/reply/unsubscribe take effect; statistics can be verified from events. Complete phase four regression, operation documentation, real verification records, and public external launch checklist. Do not treat completed design documents or demos as the product being complete.
