@@ -132,9 +132,10 @@ def join(body: Join, response: Response):
     throttle(body.email)
     with Session() as db:
         invitation = db.scalar(select(Invitation).where(Invitation.token_hash == digest(body.invitation)).with_for_update())
-        if (not invitation or invitation.used_at or utc(invitation.expires_at) <= datetime.now(timezone.utc)
-                or invitation.email != body.email):
-            raise HTTPException(400, "The invitation is invalid, expired, already used, or belongs to another email.")
+        if (not invitation or invitation.used_at or invitation.use_count >= invitation.max_uses
+                or utc(invitation.expires_at) <= datetime.now(timezone.utc)
+                or (invitation.email and invitation.email != body.email)):
+            raise HTTPException(400, "The invitation is invalid, expired, fully used, or belongs to another email.")
         workspace = Workspace(id=str(uuid4()), name="Personal workspace")
         db.add(workspace)
         db.flush()
@@ -142,7 +143,11 @@ def join(body: Join, response: Response):
         db.add(user)
         try:
             db.flush()
-            invitation.used_at = datetime.now(timezone.utc)
+            # The invitation row remains locked until this account and its usage commit.
+            # Failed or duplicate registrations roll back without consuming a place.
+            invitation.use_count += 1
+            if invitation.use_count >= invitation.max_uses:
+                invitation.used_at = datetime.now(timezone.utc)
             login_cookie(db, user, response)
             db.commit()
         except IntegrityError:

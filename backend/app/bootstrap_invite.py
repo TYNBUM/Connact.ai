@@ -15,14 +15,14 @@ def bootstrap_invite():
         return
     if (
         settings.auth_mode != "invite"
-        or "@" not in email
+        or (email and "@" not in email)
         or len(email) > 250
         or any(c.isspace() for c in email)
         or not re.fullmatch(r"[a-f0-9]{64}", token_hash)
     ):
         raise RuntimeError("Invalid bootstrap invitation configuration.")
     with Session() as db:
-        if db.scalar(select(User.id).where(User.email == email)):
+        if email and db.scalar(select(User.id).where(User.email == email)):
             return
         if db.scalar(select(Invitation.id).where(Invitation.token_hash == token_hash)):
             return
@@ -30,6 +30,7 @@ def bootstrap_invite():
             Invitation(
                 email=email,
                 token_hash=token_hash,
+                max_uses=settings.bootstrap_invite_max_uses,
                 expires_at=datetime.now(timezone.utc) + timedelta(days=7),
             )
         )

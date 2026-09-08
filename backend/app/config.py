@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     render_external_hostname: str = ""
     bootstrap_invite_email: str = ""
     bootstrap_invite_token_hash: str = ""
+    bootstrap_invite_max_uses: int = Field(default=1, ge=1, le=1000)
 
     @field_validator("database_url")
     @classmethod
