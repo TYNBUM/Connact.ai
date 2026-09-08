@@ -72,7 +72,7 @@ class Credentials(BaseModel):
 
 
 class Join(Credentials):
-    invitation: str = Field(min_length=20, max_length=200)
+    invitation: str = Field(min_length=6, max_length=200)
 
 
 def throttle(email):
