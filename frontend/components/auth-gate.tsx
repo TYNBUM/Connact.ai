@@ -3,7 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api, post, errorText } from "@/lib/api";
 
 type Session = {
-  mode: "local" | "invite";
+  mode: "local" | "invite" | "open";
   authenticated: boolean;
   email: string | null;
   workspace_id: string | null;
@@ -37,7 +37,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       await post(joining ? "/auth/join" : "/auth/login", {
         email,
         password,
-        ...(joining ? { invitation } : {}),
+        ...(joining && session?.mode === "invite" ? { invitation } : {}),
       });
       setPassword("");
       setInvitation("");
@@ -71,14 +71,20 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         ) : (
           <>
             <h1>{joining ? "Create your workspace" : "Welcome back"}</h1>
-            <p>{joining ? "使用邀请创建独立工作区" : "登录你的工作区"}</p>
+            <p>
+              {joining
+                ? session.mode === "invite"
+                  ? "使用邀请创建独立工作区"
+                  : "注册后即可使用独立工作区"
+                : "登录你的工作区"}
+            </p>
             <form onSubmit={submit}>
               <label>
-                Email / 邮箱
+                {joining ? "Email / 邮箱" : "Email or username / 邮箱或账号"}
                 <input
                   required
-                  type="email"
-                  autoComplete="email"
+                  type={joining ? "email" : "text"}
+                  autoComplete={joining ? "email" : "username"}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
@@ -88,7 +94,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                 <input
                   required
                   type="password"
-                  minLength={12}
+                  minLength={joining ? 12 : 6}
                   maxLength={128}
                   autoComplete={joining ? "new-password" : "current-password"}
                   value={password}
@@ -98,15 +104,22 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               {joining && (
                 <>
                   <small>Use at least 12 characters. / 至少 12 个字符。</small>
-                  <label>
-                    Invitation code / 邀请码
-                    <input
-                      required
-                      autoComplete="off"
-                      value={invitation}
-                      onChange={(e) => setInvitation(e.target.value)}
-                    />
-                  </label>
+                  {session.mode === "invite" && (
+                    <label>
+                      Invitation code / 邀请码
+                      <input
+                        required
+                        autoComplete="off"
+                        value={invitation}
+                        onChange={(e) => setInvitation(e.target.value)}
+                      />
+                    </label>
+                  )}
+                  <small>
+                    Administrators can view the information and files you save.
+                    <br />
+                    平台管理员可以查看你保存的信息和上传的文件。
+                  </small>
                 </>
               )}
               {error && (
@@ -131,12 +144,14 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
             >
               {joining
                 ? "Already have an account? Sign in / 登录"
-                : "Have an invitation? Create account / 邀请注册"}
+                : session.mode === "invite"
+                  ? "Have an invitation? Create account / 邀请注册"
+                  : "Create account / 免费注册"}
             </button>
             <small>
-              Account access issues? Contact the person who invited you.
+              Account access issues? Contact the administrator.
               <br />
-              账户访问遇到问题，请联系邀请人。
+              账户访问遇到问题，请联系管理员。
             </small>
           </>
         )}

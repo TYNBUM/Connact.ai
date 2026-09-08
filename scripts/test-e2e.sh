@@ -51,6 +51,12 @@ if os.environ['AUTH_MODE'] == 'invite':
         for token, email in ((os.environ['E2E_INVITATION'], os.environ['E2E_TEST_EMAIL']), (os.environ['E2E_SECOND_INVITATION'], os.environ['E2E_SECOND_EMAIL'])):
             db.add(Invitation(token_hash=digest(token), email=email, expires_at=datetime.now(timezone.utc) + timedelta(hours=1)))
         db.commit()
+if os.environ['AUTH_MODE'] == 'open':
+    from app.bootstrap_admin import bootstrap_admin
+    from app.config import settings
+    from app.routers.auth import password_hash
+    settings.bootstrap_admin_password_hash = password_hash('browser-admin-test-only')
+    bootstrap_admin()
 PY
 )
 cp frontend/tsconfig.json "$e2e_run_dir/tsconfig.before.json"

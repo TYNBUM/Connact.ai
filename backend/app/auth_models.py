@@ -1,6 +1,6 @@
 """Invite-only accounts and opaque, revocable sessions."""
 from datetime import datetime
-from sqlalchemy import String, ForeignKey, DateTime, Integer
+from sqlalchemy import String, ForeignKey, DateTime, Integer, Boolean, false
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
 from .models import Identity, now
@@ -12,6 +12,8 @@ class User(Identity, Base):
     password_hash: Mapped[str] = mapped_column(String(300))
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LoginSession(Identity, Base):

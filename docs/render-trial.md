@@ -9,7 +9,7 @@
 - 地区：Singapore。前端、后端、PostgreSQL 均为 Free。
 - 数据库：`connact-ai-db`，Render 显示到期日为 2026-10-08。
 - 两个 Web Service 使用账号已连接的 GitHub `TYNBUM/Connact.ai`，跟踪 `main`，分别以 `frontend`、`backend` 为根目录自动部署。
-- 已验证：网站 HTTP 200；后端和前端代理健康检查返回 PostgreSQL 正常；会话处于邀请登录模式；未登录访问配置返回 401，未允许的 Origin 返回 403。
+- 已验证：网站 HTTP 200；后端和前端代理健康检查返回 PostgreSQL 正常；工作区需要登录；未登录访问配置返回 401，未允许的 Origin 返回 403。
 - 提供商 API Key 尚待授权导入；不能视为 AI/查人端到端验收通过。
 
 | 服务 | Root Directory | Dockerfile | 环境配置 |
@@ -21,33 +21,29 @@
 后端环境变量：
 
 - `DATABASE_URL`：Render PostgreSQL 的内部连接串。应用自动将 `postgres://` / `postgresql://` 转为已安装的 `postgresql+psycopg://` 驱动。
-- `AUTH_MODE=invite`，`PUBLIC_ORIGIN` 必须为实际前端 HTTPS 地址。
+- `AUTH_MODE=open`，`PUBLIC_ORIGIN` 必须为实际前端 HTTPS 地址。
 - `PORT=10000`，`UPLOAD_DIR=/app/data/uploads`。Render 自带的 `RENDER_EXTERNAL_HOSTNAME` 自动加入后端 Host 白名单。
 - `AI_MODE=live`、`PEOPLE_MODE=live`、`PUBLIC_SEARCH_MODE=live`。
 - `AI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`、`AI_PROVIDER=bailian`、`AI_MODEL=qwen-plus`、`AI_MODELS=qwen-plus,qwen-turbo,qwen-max`。
 - `AI_API_KEY`、`SERPAPI_API_KEY`、`APIFY_API_KEY`、可选 `APOLLO_API_KEY`，仅导入服务端 Environment，不能进入仓库或前端。
 
 前端在未显式配置 `PUBLIC_ORIGIN` 时使用 Render 的 `RENDER_EXTERNAL_URL` 校验 Origin。
-后端 Docker 启动时先迁移数据库，然后创建首次邀请码（若有配置），最后启动单 API 进程和后台 worker。
+后端 Docker 启动时先迁移数据库，再创建管理员（若有配置），最后启动单 API 进程和后台 worker。
 
-## 免费实例的首次邀请
+## 开放注册与管理员
 
-Free 实例没有 Shell/one-off jobs。初次部署可以设置：
+`AUTH_MODE=open` 允许任意邮箱注册，不再校验邀请码或限制四人名额。注册成功即建立独立工作区。注册页告知用户管理员可查看其保存的信息和文件。
 
-- `BOOTSTRAP_INVITE_EMAIL`：可选的指定登录邮箱。留空或不设置时，邀请码允许任意邮箱注册。
-- `BOOTSTRAP_INVITE_TOKEN_HASH`：本地产生的强随机邀请码的 SHA-256；原始邀请码仅交给用户，不放进服务器日志。
-- `BOOTSTRAP_INVITE_MAX_USES`：最多成功注册人数，默认 1；本次四人共享试用配置为 4。
-- `BOOTSTRAP_INVITE_EXPIRES_AT`：可选的带时区 ISO 到期时间，用于明确修改已有邀请码的截止日期；本次试用为 `2026-10-08T08:14:28Z`。
+首次管理员通过 `BOOTSTRAP_ADMIN_PASSWORD_HASH` 配置：在本地产生 scrypt 密码哈希，仅把哈希写入 Render 后端 Environment。启动时创建保留账号 `admin` 和管理员角色；重启不重置已有密码。普通注册接口不能使用 `admin` 作为邮箱或自行取得管理员角色。管理员创建完成后可删除该初始化变量。
 
-这些变量仅创建一个默认三十天有效的邀请码，不创建账号或设置密码。用户通过网页设置自己的密码。邀请码区分大小写，每个账号使用独立邮箱并拥有独立工作区。
-成功注册才消耗名额；重复邮箱或失败的注册不消耗名额。PostgreSQL 在注册事务中锁定邀请码记录，防止并发注册超出人数上限。
-重启不会滚动续期、重置已用名额或重新开启已耗尽的邀请码；只有显式配置固定到期时间时才更新尚未耗尽的邀请码。绑定邮箱且该邮箱账号已存在时不再创建。完成注册后可删除这些环境变量。
-部署不导入本地工作区数据。
+管理员后台：<https://connact-ai.onrender.com/admin>。支持账号搜索、分页、注册/最后登录时间、各类保存数据计数，逐项查看画像、历史版本、联系人、详细档案、来源、匹配、草稿、查人与写作任务及上传文件。文件可下载原件并查看保存的文本和解析结果。后台为只读；不展示密码哈希、会话令牌或提供商密钥。
+
+部署不导入本地工作区数据。旧邀请码配置在开放注册模式下不再执行。
 
 ## 免费试用限制
 
 Free Web Service 会在 15 分钟无流量后休眠，冷启动约需一分钟；两个 Web Service 共享工作区每月 750 小时额度。
-本地上传文件在重启/重新部署/休眠后丢失，待处理的解析可能需要重新上传；已存入 PostgreSQL 的联系人、草稿和解析结果仍受数据库生命周期约束。
+新上传原件与联系人、草稿、解析结果一起存入 PostgreSQL，应用重启不会丢失数据库内的文件。旧版本已随临时磁盘丢失的原件无法恢复，后台会显示不可下载。所有数据和文件仍受免费数据库容量及到期时间约束。
 Free PostgreSQL 30 天后到期，不能用于长期保存真实客户数据。模型与搜索提供商仍按各自用量计费。
 
 若在其他账号使用 Public Git Repository 方式连接，普通公开仓库部署不保证自动随 push 更新，需要从 Render 手动部署最新提交。当前实例使用已有 GitHub 连接。

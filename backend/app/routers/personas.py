@@ -1,6 +1,4 @@
-from pathlib import Path
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
 from ..db import get_repo
 from ..config import settings
 from ..models import Persona, PersonaRevision, UploadedDocument, Draft
@@ -14,6 +12,7 @@ from ..services.documents import (
     wake_document_worker,
 )
 from time import monotonic, sleep
+from ..services.file_storage import file_response
 
 router = APIRouter()
 
@@ -109,12 +108,4 @@ def upload(file: UploadFile = File(...), repo=Depends(get_repo)):
 @router.get("/documents/{id}/download")
 def download(id: str, repo=Depends(get_repo)):
     d = repo.get(UploadedDocument, id)
-    path = Path(settings.upload_dir).resolve() / repo.workspace_id / d.storage_key
-    if not path.is_file():
-        raise HTTPException(404, "Stored file is missing.")
-    return FileResponse(
-        path,
-        filename=d.original_name,
-        media_type="application/octet-stream",
-        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
-    )
+    return file_response(repo.session, d)

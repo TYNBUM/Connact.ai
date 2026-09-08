@@ -161,7 +161,8 @@ export type Preview = {
   variables: Record<string, string>;
 };
 export type Config = {
-  auth_mode?: "local" | "invite";
+  auth_mode?: "local" | "invite" | "open";
+  is_admin?: boolean;
   workspace_id?: string;
   people_mode: string;
   ai_mode: string;

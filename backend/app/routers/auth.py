@@ -58,7 +58,17 @@ def workspace_for_request(db, request):
     return user.workspace_id
 
 
-class Credentials(BaseModel):
+class LoginCredentials(BaseModel):
+    email: str = Field(min_length=3, max_length=250)
+    password: str = Field(min_length=6, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalized_login(cls, value):
+        return value.strip().lower()
+
+
+class Credentials(LoginCredentials):
     email: str = Field(min_length=3, max_length=250)
     password: str = Field(min_length=12, max_length=128)
 
@@ -72,7 +82,7 @@ class Credentials(BaseModel):
 
 
 class Join(Credentials):
-    invitation: str = Field(min_length=6, max_length=200)
+    invitation: str = Field(default="", max_length=200)
 
 
 def throttle(email):
@@ -90,6 +100,7 @@ def throttle(email):
 
 
 def login_cookie(db, user, response):
+    user.last_login_at = datetime.now(timezone.utc)
     token = secrets.token_urlsafe(32)
     db.add(LoginSession(token_hash=digest(token), user_id=user.id,
                         expires_at=datetime.now(timezone.utc) + timedelta(days=settings.session_days)))
@@ -101,16 +112,17 @@ def login_cookie(db, user, response):
 @router.get("/session")
 def session(request: Request):
     if settings.auth_mode == "local":
-        return {"mode": "local", "authenticated": True, "email": None, "workspace_id": settings.workspace_id}
+        return {"mode": "local", "authenticated": True, "email": None, "workspace_id": settings.workspace_id, "is_admin": False}
     with Session() as db:
         user = session_user(db, request)
-        return {"mode": "invite", "authenticated": bool(user),
-                "email": user.email if user else None, "workspace_id": user.workspace_id if user else None}
+        return {"mode": settings.auth_mode, "authenticated": bool(user),
+                "email": user.email if user else None, "workspace_id": user.workspace_id if user else None,
+                "is_admin": bool(user and user.is_admin)}
 
 
 @router.post("/login")
-def login(body: Credentials, request: Request, response: Response):
-    if settings.auth_mode != "invite":
+def login(body: LoginCredentials, request: Request, response: Response):
+    if settings.auth_mode == "local":
         raise HTTPException(409, "Sign-in is disabled in local mode.")
     throttle(body.email)
     with Session() as db:
@@ -127,15 +139,17 @@ def login(body: Credentials, request: Request, response: Response):
 
 @router.post("/join")
 def join(body: Join, response: Response):
-    if settings.auth_mode != "invite":
-        raise HTTPException(409, "Invitations are disabled in local mode.")
+    if settings.auth_mode == "local":
+        raise HTTPException(409, "Registration is disabled in local mode.")
     throttle(body.email)
     with Session() as db:
-        invitation = db.scalar(select(Invitation).where(Invitation.token_hash == digest(body.invitation)).with_for_update())
-        if (not invitation or invitation.used_at or invitation.use_count >= invitation.max_uses
-                or utc(invitation.expires_at) <= datetime.now(timezone.utc)
-                or (invitation.email and invitation.email != body.email)):
-            raise HTTPException(400, "The invitation is invalid, expired, fully used, or belongs to another email.")
+        invitation = None
+        if settings.auth_mode == "invite":
+            invitation = db.scalar(select(Invitation).where(Invitation.token_hash == digest(body.invitation)).with_for_update())
+            if (not invitation or invitation.used_at or invitation.use_count >= invitation.max_uses
+                    or utc(invitation.expires_at) <= datetime.now(timezone.utc)
+                    or (invitation.email and invitation.email != body.email)):
+                raise HTTPException(400, "The invitation is invalid, expired, fully used, or belongs to another email.")
         workspace = Workspace(id=str(uuid4()), name="Personal workspace")
         db.add(workspace)
         db.flush()
@@ -145,9 +159,10 @@ def join(body: Join, response: Response):
             db.flush()
             # The invitation row remains locked until this account and its usage commit.
             # Failed or duplicate registrations roll back without consuming a place.
-            invitation.use_count += 1
-            if invitation.use_count >= invitation.max_uses:
-                invitation.used_at = datetime.now(timezone.utc)
+            if invitation:
+                invitation.use_count += 1
+                if invitation.use_count >= invitation.max_uses:
+                    invitation.used_at = datetime.now(timezone.utc)
             login_cookie(db, user, response)
             db.commit()
         except IntegrityError:

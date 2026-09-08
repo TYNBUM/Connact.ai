@@ -9,6 +9,8 @@ from .auth_models import Invitation, User
 
 
 def bootstrap_invite():
+    if settings.auth_mode != "invite":
+        return
     email = settings.bootstrap_invite_email.strip().lower()
     token_hash = settings.bootstrap_invite_token_hash
     if not email and not token_hash:

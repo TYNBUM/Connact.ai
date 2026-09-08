@@ -100,7 +100,8 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from ..config import settings
 from ..db import Session
-from ..models import UploadedDocument, now
+from ..models import UploadedDocument, DocumentFile, now
+from .file_storage import read_content
 from ..providers.ai import CompatibleAI, MockAI, resolve_model
 
 PARSE_PROMPT_VERSION = "resume-parse-v1"
@@ -184,7 +185,7 @@ def queue_document(repo, file):
     path.chmod(0o600)
     try:
         with repo.session.begin_nested():
-            return repo.add(
+            document = repo.add(
                 UploadedDocument,
                 original_name=name,
                 storage_key=key,
@@ -196,6 +197,9 @@ def queue_document(repo, file):
                 parse_model=model,
                 parse_prompt_version=PARSE_PROMPT_VERSION,
             )
+            repo.session.add(DocumentFile(document_id=document.id, byte_size=len(content), content=content))
+            repo.session.flush()
+            return document
     except IntegrityError:
         path.unlink(missing_ok=True)
         cached = cached_document(repo, digest, mode, provider, model)
@@ -276,6 +280,11 @@ def process_document(document_id):
             document.parse_model,
         )
         prompt_version, digest = document.parse_prompt_version, document.content_hash
+        # Keep the original available even when a free host discards its local disk.
+        try:
+            stored_content = read_content(db, document)
+        except HTTPException:
+            stored_content = None
         db.commit()
     extracted, data, error = "", None, None
     try:
@@ -288,7 +297,9 @@ def process_document(document_id):
                 409,
                 "The parser configuration changed while this upload was queued. Retry parsing with the current configuration.",
             )
-        content = path.read_bytes()
+        if stored_content is None:
+            raise ValueError("Original file is unavailable. Please upload it again.")
+        content = stored_content
         if digest and sha256(content).hexdigest() != digest:
             raise ValueError(
                 "The stored file changed after upload. Upload the original file again."

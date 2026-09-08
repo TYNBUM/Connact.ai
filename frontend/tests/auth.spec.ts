@@ -74,7 +74,7 @@ test("invitation, login, logout, and browser sessions keep workspaces isolated",
     page.getByRole("heading", { name: "Welcome back" }),
   ).toBeVisible();
   expect((await page.request.get("/api/drafts/" + draftId)).status()).toBe(401);
-  await page.getByLabel("Email / 邮箱").fill(email);
+  await page.getByLabel("Email or username / 邮箱或账号").fill(email);
   await page.getByLabel("Password / 密码").fill("incorrect-test-password");
   await page
     .getByRole("button", { name: "Sign in / 登录", exact: true })

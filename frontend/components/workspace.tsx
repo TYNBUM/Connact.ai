@@ -20,6 +20,7 @@ import {
   Globe2,
   Moon,
   Sun,
+  ShieldCheck,
 } from "lucide-react";
 import { AppProvider, useApp } from "@/lib/context";
 import { Nav } from "./ui";
@@ -28,6 +29,7 @@ import Personas from "./personas";
 import { PeopleSearch, Contacts } from "./people";
 import EmailStudio from "./email-studio";
 import AuthGate from "./auth-gate";
+import Admin from "./admin";
 import { post } from "@/lib/api";
 
 const main = [
@@ -66,6 +68,7 @@ function Shell() {
     ["/academic", "Academic", "学术", GraduationCap],
     ["/settings", "Settings", "设置", Settings2],
     ["/settings/integrations", "Integrations", "集成", Settings2],
+    ["/admin", "Administration", "管理员后台", ShieldCheck],
   ].find((x) => x[0] === path);
   const title = current
     ? t(String(current[1]), String(current[2]))
@@ -95,7 +98,7 @@ function Shell() {
           <div>
             {t("Personal workspace", "个人工作区")}
             <small>
-              {config?.auth_mode === "invite"
+              {config?.auth_mode !== "local"
                 ? t("Private workspace", "独立工作区")
                 : t("Local workspace", "本地工作区")}
             </small>
@@ -153,6 +156,15 @@ function Shell() {
           ))}
         </nav>
         <div className="sidebar-bottom">
+          {config?.is_admin && (
+            <Nav
+              href="/admin"
+              className={`nav-item ${path === "/admin" ? "active" : ""}`}
+            >
+              <ShieldCheck size={18} />
+              {t("Administration", "管理员后台")}
+            </Nav>
+          )}
           <Nav
             href="/settings"
             className={`nav-item ${path.startsWith("/settings") ? "active" : ""}`}
@@ -163,7 +175,7 @@ function Shell() {
           <div className="account">
             <span className="workspace-monogram">P</span>
             <div>{t("Personal account", "个人账户")}</div>
-            {config?.auth_mode === "invite" && (
+            {config && config.auth_mode !== "local" && (
               <button
                 onClick={async () => {
                   try {
@@ -279,6 +291,8 @@ function Shell() {
             <Contacts />
           ) : path === "/email" ? (
             <EmailStudio />
+          ) : path === "/admin" ? (
+            <Admin />
           ) : (
             <ComingSoon path={path} title={title} />
           )}

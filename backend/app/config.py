@@ -80,7 +80,8 @@ class Settings(BaseSettings):
     apify_profile_actor: str = "harvestapi/linkedin-profile-scraper"
     apify_max_charge_usd: float = 0.05
     people_cache_hours: int = 168
-    auth_mode: Literal["local", "invite"] = "local"
+    auth_mode: Literal["local", "invite", "open"] = "local"
+    bootstrap_admin_password_hash: str = ""
     public_origin: str = "http://127.0.0.1:3100"
     allowed_hosts: str = "localhost,127.0.0.1,backend,testserver"
     session_days: int = 7

@@ -1,67 +1,28 @@
-# Invitation-only customer trial
+# Customer registration and administration
 
-The app is runnable locally with live providers. This guide prepares a **small, single-server invitation trial**. A public server, domain and TLS certificate have not been supplied or deployed in this task. Gmail sending is not connected; users can copy reviewed messages or export an unsent `.eml` file for their email client.
+The Render trial uses public email registration and a separate administrator account. Website: <https://connact-ai.onrender.com>. Deployment details and free-plan limits are in [render-trial.md](render-trial.md). Gmail sending is not connected; users can copy reviewed messages or export an unsent `.eml` file.
 
-## Local operation
+## Access
 
-Keep `AUTH_MODE=local` and run `./scripts/dev.sh`. Open `http://127.0.0.1:3100`. Existing personal data remains in its original workspace. Provider credentials live only in the server `.env`; do not put them in `NEXT_PUBLIC_*` variables. `AI_MODELS` is a comma-separated allowlist; every saved draft records its selected model.
+- `AUTH_MODE=local`: private localhost development workspace.
+- `AUTH_MODE=open`: email registration without invitation; each account has an independent workspace. Existing invited accounts keep their data and passwords.
+- `AUTH_MODE=invite`: optional restricted registration retained for other installations.
+- Public modes require an exact HTTPS `PUBLIC_ORIGIN`. Sessions use HttpOnly, SameSite cookies and expire after `SESSION_DAYS` (default 7). Login and registration retain server-side rate limits.
 
-## Trial hosting
+Registration only accepts email and password (at least 12 characters); it cannot assign administrator roles. The login form also accepts the reserved `admin` username. Registration discloses administrator access to saved information and uploaded files.
 
-Use one backend process and one PostgreSQL database. Copy `.env.example` to the server `.env` and configure its own database, upload storage, provider keys and live modes. Set:
+## Administrator setup
 
-```dotenv
-AUTH_MODE=invite
-PUBLIC_ORIGIN=https://your-customer-domain.example
-PUBLIC_HOST=your-customer-domain.example
-ALLOWED_HOSTS=backend,localhost,127.0.0.1,your-customer-domain.example
-```
+Set `BOOTSTRAP_ADMIN_PASSWORD_HASH` to a scrypt hash generated locally by `app.routers.auth.password_hash`. Never commit the password or its deployment hash. The Render Docker startup runs `python -m app.bootstrap_admin` after migrations and creates the reserved `admin` account if absent. Existing administrator passwords are never overwritten on restart. Remove the bootstrap variable after setup if desired. Other launchers can run that module explicitly before starting the server.
 
-Replace the example host with a real domain. Both the frontend proxy and backend require the same exact `PUBLIC_ORIGIN`. Start with:
+The `/admin` console provides account search, pagination, registration and last-login times, record counts, saved personas and revisions, contacts and profiles, evidence and assessments, drafts, search/people jobs, writing jobs, and uploaded originals with extraction results. This is read-only account inspection; password reset, account deletion and role-editing UI are not included.
 
-```bash
-docker compose -f compose.yaml -f compose.invite.yaml config --quiet
-docker compose -f compose.yaml -f compose.invite.yaml up --build -d
-```
+Every `/api/admin/*` request checks a valid session and the current database administrator role. Regular users cannot enumerate other accounts or download their documents. No administrator password hashes, session tokens or provider API keys are returned. Saved HTML and provider output are displayed as text, and original files download as attachments.
 
-Use `config --quiet` for validation: printing the resolved Compose configuration would expose provider credentials from the server `.env`. The invitation override passes the same `PUBLIC_ORIGIN` to the frontend proxy and backend; `PUBLIC_HOST` must be the hostname from that URL, without a scheme or path.
+## Files and operation
 
-Compose keeps database, API and frontend ports bound to loopback. Configure the server's HTTPS reverse proxy to forward the domain to `127.0.0.1:3100`; retain normal TLS validation and a request-body limit above 8 MB for resumes. Serve only the frontend publicly, with API access passing through its proxy. Do not run `AUTH_MODE=local` behind a public proxy.
+Original PDF/DOCX uploads (maximum 8 MB) are stored in PostgreSQL together with their metadata. A missing application disk does not prevent parsing or download of these originals. Older local files still available at startup are copied into the database; a file already lost before this version cannot be recovered. On Render Free, the database remains limited in capacity and expires after 30 days.
 
-The frontend image copies standalone code, static files and public brand assets with ownership assigned to its unprivileged `node` user. Build contexts exclude `.env*`, `.next*` (including Playwright build directories), dependencies and test artifacts. The backend image creates its upload directory for the unprivileged `meridian` user. Compose uses a named upload volume; if replacing it with a bind mount, prepare the host directory for that container user's UID/GID before starting the backend. Keep the existing database and upload volumes when rebuilding images.
+Run one backend process. People, document and writing jobs persist in the database; ambiguous interrupted provider calls surface as failures rather than silently repeating charges. Provider keys remain exclusively on the backend. Public registration does not configure or grant access to paid upstream providers.
 
-The backend refuses a public origin in local mode and requires HTTPS for customer origins. Sessions use random opaque tokens; only their SHA-256 hashes are stored, with expiry and server-side revocation. Cookies are HttpOnly, SameSite=Strict and Secure on HTTPS. Passwords use salted scrypt. Workspace identity comes from the authenticated session, never a request's workspace header or body.
-
-## Invite one customer
-
-Inside the backend environment, after migrations:
-
-```bash
-python -m app.invite customer@example.com --output /app/data/uploads/customer-invitation.txt
-```
-
-The command creates a single-use, email-bound invitation valid for seven days and writes the code into a new file with mode `0600`. It does not email the customer or print the code to logs. Privately provide the customer their code and the site URL. They select **Have an invitation? Create account**, enter the invited email and choose a password. Their workspace starts empty; the local owner's data is not imported or shared.
-
-For a local authentication smoke test, use `AUTH_MODE=invite` with `PUBLIC_ORIGIN=http://127.0.0.1:3100`, restart the server, then create a test invitation. Local HTTP omits the Secure cookie flag; real hosting must use HTTPS.
-
-## Operation and practical limits
-
-- Back up PostgreSQL and the upload directory together. Apply Alembic migrations before starting workers. Keep a tested restore procedure before collecting customer data.
-- Single-process workers consume persistent jobs. Queued tasks resume; ambiguous interrupted chargeable calls become visible failures instead of silently being billed again. Apify jobs persist upstream run IDs and resume polling an existing run.
-- Search cache: one hour. Profile/email cache: seven days by default. Manual identity edits invalidate contact-task cache. Explicit refresh can incur another provider charge.
-- Apify calls are one profile at a time with a configurable per-run maximum charge (`APIFY_MAX_CHARGE_USD=0.05`). Its work-email lookup is an explicit alternative, never a hidden fallback after Apollo fails.
-- Provider and sign-in rate limits are in one process. Multiple replicas, distributed quotas and per-customer billing are outside this trial deployment.
-- There is no self-service password recovery, customer billing, email verification or administrative account-management UI yet. Account access problems need operator support. Public self-registration remains disabled.
-- A provider's successful response is not a promise that every field or email exists. Third-party profile claims retain provenance. Delivery is not verified by this app, and phone numbers are not requested.
-
-Before expanding beyond invited users, add the operational account-recovery process, per-customer quotas, monitoring and tested backups. This guide does not assert that a public deployment or Gmail OAuth has already been completed.
-
-## Container verification on 2026-09-08
-
-Docker Desktop Engine and CLI 29.7.2 were available through the installed application bundle. Both the base Compose file and invitation override passed `config --quiet`. An actual BuildKit export using `FROM scratch` confirmed the frontend context excluded `.env*`, `.next*` and `node_modules` (34 files, approximately 338 kB at verification).
-
-Both `coldemail-backend` and `coldemail-frontend` images built successfully. The initial client configuration encountered a missing credential helper and then a base-image metadata timeout; a temporary, anonymous Docker client configuration succeeded without changing the existing Docker account or configuration.
-
-Isolated containers ran without network access or published host ports. The frontend ran as UID 1000, served its homepage, JavaScript and both logo variants with HTTP 200, and wrote its Next.js cache successfully. The backend ran as UID 1000; a fresh anonymous upload volume inherited writable UID 1000 ownership. All migrations and `alembic check` passed against a temporary SQLite database inside the container, and health and draft creation returned HTTP 200. Invitation mode also started with the configured HTTPS origin, rejected a different origin with HTTP 403, and required authentication for workspace data.
-
-The combined Compose stack, PostgreSQL 16 container, public DNS/TLS routing and customer traffic were not started or tested. No host ports were published, no existing volumes were mounted, and the running local database was unchanged. Validate those remaining deployment paths on the intended customer server before inviting users.
+There is no email verification, self-service password recovery, mailbox OAuth, email sending or per-customer billing. Back up the database, including `document_files`, to preserve account data and original uploads.

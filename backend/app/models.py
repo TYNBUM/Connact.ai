@@ -11,6 +11,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     text,
+    LargeBinary,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
@@ -77,6 +78,13 @@ class UploadedDocument(Scoped, Base):
     parse_prompt_version: Mapped[str] = mapped_column(String(60), default="")
     parse_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     parse_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DocumentFile(Base):
+    __tablename__ = "document_files"
+    document_id: Mapped[str] = mapped_column(ForeignKey("uploaded_documents.id", ondelete="CASCADE"), primary_key=True)
+    byte_size: Mapped[int] = mapped_column(Integer)
+    content: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
 
 
 class Contact(Scoped, Base):

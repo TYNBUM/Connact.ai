@@ -1,6 +1,6 @@
 # Connact.ai
 
-A runnable networking and AI email-writing workspace with persistent background jobs, optional invitation accounts, and Next.js, React, TypeScript, Tiptap, FastAPI, SQLAlchemy, Alembic, and PostgreSQL.
+A runnable networking and AI email-writing workspace with persistent background jobs, open registration, a read-only administrator console, and Next.js, React, TypeScript, Tiptap, FastAPI, SQLAlchemy, Alembic, and PostgreSQL.
 
 Implemented: resume parsing or manually created persona → people search → evidence-based recommendations → save contact → generate and edit email → auto-save → final variable preview → copy content.
 
@@ -68,7 +68,7 @@ cd frontend
 npm run dev
 ```
 
-Default `AUTH_MODE=local` is a personal development workspace and must stay bound to localhost. Optional `AUTH_MODE=invite` adds invitation registration, password login, expiring/revocable HttpOnly sessions, and a separate server-derived workspace for every customer. Use the [invitation trial deployment guide](docs/customer-trial.md) for HTTPS hosting. Run one backend process; workers and rate limits are not distributed.
+Default `AUTH_MODE=local` is a personal development workspace and must stay bound to localhost. `AUTH_MODE=open` enables email registration without an invitation, password login, expiring/revocable HttpOnly sessions, and a separate server-derived workspace for every customer. Administrators can inspect accounts, saved workspace records, and original uploads at `/admin`; every admin API and download requires a server-verified administrator role. `AUTH_MODE=invite` remains available for restricted deployments. Use the [customer trial deployment guide](docs/customer-trial.md) for HTTPS hosting. Run one backend process; workers and rate limits are not distributed.
 
 ## Demo and Usage
 
@@ -151,7 +151,7 @@ Finance extensions are stored in `ContactDomainProfile(domain="finance")`; Acade
 
 Drafts associate contacts and personas, recording persona version and optimistic lock `revision`. Writes are validated through database row locks, not silently overwriting changes from other tabs. After modifying a persona or contact, associated drafts are returned to Draft and require rechecking. The server cleans up rich text and link protocols; during preview replacement, fields are escaped to prevent external data from being treated as HTML.
 
-Uploads are only allowed for PDF/DOCX, 8 MB, PDF with 30 pages, and extracted text with 50,000 characters; encrypted/damaged/empty-text PDFs will fail, and no OCR is performed currently. Storage uses random filenames, private directories, and file permissions, with no public static file routing. Downloads must be through document IDs within the workspace scope.
+Uploads are only allowed for PDF/DOCX, 8 MB, PDF with 30 pages, and extracted text with 50,000 characters; encrypted/damaged/empty-text PDFs will fail, and no OCR is performed currently. Original uploads are also stored in PostgreSQL so new uploads survive an application disk reset. Legacy files still on disk are copied into the database at startup; originals already lost cannot be recovered. Downloads require the owning workspace or an authenticated administrator and are always served as attachments. There is no public static file route.
 
 Future Gmail, Inbox, and Campaign modules can reference existing Contacts and Drafts directly. PostgreSQL stores background people tasks, writing suggestions and resume parsing results; single-process workers execute them. No email-send queue or automatic sequences exist.
 

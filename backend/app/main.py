@@ -7,22 +7,24 @@ from sqlalchemy import select, text
 from .db import Session, get_repo
 from .models import Workspace
 from .config import settings
-from .routers import personas, contacts, finance, drafts, auth, export
+from .routers import personas, contacts, finance, drafts, auth, export, admin
 from .services.drafts import start_writing_worker, stop_writing_worker
 from .services.people_jobs import start_people_worker, stop_people_worker
 from .services.documents import start_document_worker, stop_document_worker
+from .services.file_storage import preserve_legacy_files
 
 
 @asynccontextmanager
 async def lifespan(app):
     if settings.auth_mode == "local" and urlparse(settings.public_origin).hostname not in ("localhost", "127.0.0.1"):
-        raise RuntimeError("A public origin requires AUTH_MODE=invite.")
-    if settings.auth_mode == "invite" and urlparse(settings.public_origin).hostname not in ("localhost", "127.0.0.1") and not settings.public_origin.startswith("https://"):
+        raise RuntimeError("A public origin requires AUTH_MODE=open or invite.")
+    if settings.auth_mode != "local" and urlparse(settings.public_origin).hostname not in ("localhost", "127.0.0.1") and not settings.public_origin.startswith("https://"):
         raise RuntimeError("Customer workspaces require an HTTPS PUBLIC_ORIGIN.")
     with Session() as db:
         if db.get(Workspace, settings.workspace_id) is None:
             db.add(Workspace(id=settings.workspace_id, name="Personal workspace"))
             db.commit()
+    preserve_legacy_files()
     start_writing_worker()
     start_people_worker()
     start_document_worker()
@@ -75,13 +77,14 @@ def health():
 
 
 @app.get("/api/config")
-def config(repo=Depends(get_repo)):
+def config(request: Request, repo=Depends(get_repo)):
     from .providers.model_registry import model_routes
 
     return {
         "workspace": "Personal workspace",
         "local_only": settings.auth_mode == "local",
         "auth_mode": settings.auth_mode,
+        "is_admin": bool((user := auth.session_user(repo.session, request)) and user.is_admin),
         "workspace_id": repo.workspace_id,
         "people_mode": settings.people_mode,
         "public_search_mode": settings.public_search_mode,
@@ -95,5 +98,5 @@ def config(repo=Depends(get_repo)):
     }
 
 
-for router in (personas.router, contacts.router, finance.router, drafts.router, auth.router, export.router):
+for router in (personas.router, contacts.router, finance.router, drafts.router, auth.router, export.router, admin.router):
     app.include_router(router, prefix="/api")
