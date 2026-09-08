@@ -84,6 +84,18 @@ class Settings(BaseSettings):
     allowed_hosts: str = "localhost,127.0.0.1,backend,testserver"
     session_days: int = 7
     provider_calls_per_minute: int = 20
+    render_external_hostname: str = ""
+    bootstrap_invite_email: str = ""
+    bootstrap_invite_token_hash: str = ""
+
+    @field_validator("database_url")
+    @classmethod
+    def postgres_driver(cls, value):
+        # Render supplies a standard Postgres URL; this app uses psycopg 3.
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value[len(prefix) :]
+        return value
 
     @field_validator("upload_dir")
     @classmethod

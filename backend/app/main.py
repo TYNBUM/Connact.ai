@@ -37,7 +37,8 @@ async def lifespan(app):
 app = FastAPI(title="Connact.ai API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=[h.strip() for h in settings.allowed_hosts.split(",") if h.strip()],
+    allowed_hosts=[h.strip() for h in settings.allowed_hosts.split(",") if h.strip()]
+    + ([settings.render_external_hostname] if settings.render_external_hostname else []),
 )
 
 

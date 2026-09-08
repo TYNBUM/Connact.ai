@@ -6,8 +6,10 @@ async function proxy(
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const origin = req.headers.get("origin");
-  const allowed = process.env.PUBLIC_ORIGIN
-    ? [process.env.PUBLIC_ORIGIN.replace(/\/$/, "")]
+  const publicOrigin =
+    process.env.PUBLIC_ORIGIN || process.env.RENDER_EXTERNAL_URL;
+  const allowed = publicOrigin
+    ? [publicOrigin.replace(/\/$/, "")]
     : ["http://localhost:3100", "http://127.0.0.1:3100"];
   if (origin && !allowed.includes(origin.replace(/\/$/, "")))
     return Response.json(
