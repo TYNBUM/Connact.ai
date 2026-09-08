@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import BaseModel, Field, field_validator
@@ -88,6 +89,14 @@ class Settings(BaseSettings):
     bootstrap_invite_email: str = ""
     bootstrap_invite_token_hash: str = ""
     bootstrap_invite_max_uses: int = Field(default=1, ge=1, le=1000)
+    bootstrap_invite_expires_at: datetime | None = None
+
+    @field_validator("bootstrap_invite_expires_at")
+    @classmethod
+    def invitation_expiry_has_timezone(cls, value):
+        if value is not None and value.utcoffset() is None:
+            raise ValueError("Invitation expiry must include a timezone.")
+        return value
 
     @field_validator("database_url")
     @classmethod

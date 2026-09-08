@@ -18,6 +18,41 @@ def test_render_postgres_url_uses_installed_driver():
         )
 
 
+def test_invitation_expiry_update_keeps_usage_and_fixed_deadline(client, monkeypatch):
+    monkeypatch.setattr(settings, "auth_mode", "invite")
+    monkeypatch.setattr(settings, "bootstrap_invite_email", "")
+    monkeypatch.setattr(settings, "bootstrap_invite_token_hash", "c" * 64)
+    monkeypatch.setattr(settings, "bootstrap_invite_max_uses", 4)
+    monkeypatch.setattr(settings, "bootstrap_invite_expires_at", None)
+    before = datetime.now(timezone.utc)
+    bootstrap_invite()
+    with Session() as db:
+        record = db.scalar(select(Invitation))
+        initial_expiry = record.expires_at.replace(tzinfo=timezone.utc)
+        assert timedelta(days=30) <= initial_expiry - before < timedelta(days=30, seconds=5)
+        record.expires_at = before + timedelta(days=7)
+        record.use_count = 1
+        db.commit()
+    deadline = before + timedelta(days=30)
+    monkeypatch.setattr(settings, "bootstrap_invite_expires_at", deadline)
+    bootstrap_invite()
+    bootstrap_invite()
+    with Session() as db:
+        record = db.scalar(select(Invitation))
+        assert record.expires_at.replace(tzinfo=timezone.utc) == deadline
+        assert record.use_count == 1 and record.max_uses == 4
+        assert record.used_at is None
+        record.used_at = before
+        record.use_count = 4
+        db.commit()
+    monkeypatch.setattr(settings, "bootstrap_invite_expires_at", deadline + timedelta(days=1))
+    bootstrap_invite()
+    with Session() as db:
+        record = db.scalar(select(Invitation))
+        assert record.expires_at.replace(tzinfo=timezone.utc) == deadline
+        assert record.use_count == 4 and record.used_at is not None
+
+
 def test_bootstrap_invitation_not_reissued_on_restart(client, monkeypatch):
     monkeypatch.setattr(settings, "auth_mode", "invite")
     monkeypatch.setattr(settings, "bootstrap_invite_email", "Owner@example.test")
