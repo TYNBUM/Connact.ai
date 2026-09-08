@@ -21,9 +21,7 @@ export function Dashboard() {
   const { t, personas, contacts, drafts } = useApp();
   return (
     <>
-      <Heading
-        title={t("Dashboard", "总览")}
-      >
+      <Heading title={t("Dashboard", "总览")}>
         <Nav href="/people" className="button primary">
           <Search size={16} />
           {t("Find people", "搜索人员")}
@@ -44,12 +42,7 @@ export function Dashboard() {
             contacts.length,
             "/contacts",
           ],
-          [
-            FileText,
-            t("Email drafts", "邮件草稿"),
-            drafts.length,
-            "/email",
-          ],
+          [FileText, t("Email drafts", "邮件草稿"), drafts.length, "/email"],
         ].map(([Icon, label, value, href]) => {
           const I = Icon as typeof Users;
           return (
@@ -249,9 +242,7 @@ export function Finance() {
   const { t } = useApp();
   return (
     <>
-      <Heading
-        title={t("Finance", "金融")}
-      />
+      <Heading title={t("Finance", "金融")} />
       <div className="finance-banner">
         <Landmark className="domain-banner-icon" size={34} aria-hidden="true" />
         <div>
@@ -357,14 +348,35 @@ export function ComingSoon({ path, title }: { path: string; title: string }) {
         <Heading
           title={t("Integrations", "集成")}
           detail={t(
-            "Current server configuration. Manage API keys in your local .env file.",
-            "当前服务器配置。API 密钥在本地 .env 文件中管理。",
+            "Service availability for this workspace. Your administrator manages provider credentials.",
+            "工作区服务配置。服务商密钥由管理员管理。",
           )}
         />
         <div className="panel integrations">
           {[
-            ["Apollo", config?.people_mode, config?.providers.apollo],
-            ["SerpAPI", config?.public_search_mode, config?.providers.serpapi],
+            [
+              t("Apollo email matching", "Apollo 邮箱匹配"),
+              config?.people_mode,
+              config?.providers.apollo,
+            ],
+            [
+              t("SerpAPI people search", "SerpAPI 人员搜索"),
+              config?.people_mode,
+              config?.providers.serpapi,
+            ],
+            [
+              t("Public sources", "补充公开来源"),
+              config?.public_search_mode,
+              config?.providers.serpapi,
+            ],
+            [
+              t(
+                "Apify professional profiles & work email",
+                "Apify 职业档案与工作邮箱",
+              ),
+              config?.people_mode,
+              config?.providers.apify,
+            ],
             ["AI provider", config?.ai_mode, config?.providers.ai],
           ].map(([name, mode, key]) => (
             <div className="integration-row" key={String(name)}>
@@ -381,8 +393,8 @@ export function ComingSoon({ path, title }: { path: string; title: string }) {
                       )
                     : key
                       ? t(
-                          "API key configured. Live connection has not been verified here.",
-                          "已配置密钥，此页面未验证真实连接。",
+                          "Configured. Access, credits and results are checked when you run a task.",
+                          "已配置。执行任务时检查权限、额度和返回结果。",
                         )
                       : t(
                           "Live mode selected. API key is missing.",

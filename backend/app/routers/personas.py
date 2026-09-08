@@ -1,14 +1,19 @@
 from pathlib import Path
-from uuid import uuid4
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from ..db import get_repo
 from ..config import settings
 from ..models import Persona, PersonaRevision, UploadedDocument, Draft
-from ..schemas import PersonaInput, PersonaData
+from ..schemas import PersonaInput
 from ..services.contacts import row
-from ..services.documents import extract_text
-from ..providers import ai
+from ..services.documents import (
+    queue_document,
+    document_response,
+    retry_document,
+    process_document,
+    wake_document_worker,
+)
+from time import monotonic, sleep
 
 router = APIRouter()
 
@@ -48,64 +53,57 @@ def update(id: str, body: PersonaInput, repo=Depends(get_repo)):
     return row(p)
 
 
-@router.post("/documents")
-def upload(file: UploadFile = File(...), repo=Depends(get_repo)):
-    name = Path(file.filename or "resume").name[:255]
-    ext = Path(name).suffix.lower()
-    if ext not in (".pdf", ".docx"):
-        raise HTTPException(
-            415,
-            "Only text-based PDF or DOCX files are supported. You can enter your background manually.",
-        )
-    content = file.file.read(8 * 1024 * 1024 + 1)
-    if len(content) > 8 * 1024 * 1024:
-        raise HTTPException(
-            413, "File exceeds 8 MB. Use a smaller resume or manual entry."
-        )
-    directory = Path(settings.upload_dir).resolve() / repo.workspace_id
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    key = str(uuid4()) + ext
-    path = directory / key
-    path.write_bytes(content)
-    path.chmod(0o600)
-    document = repo.add(
-        UploadedDocument,
-        original_name=name,
-        storage_key=key,
-        status="processing",
-        extracted_text="",
-    )
-    try:
-        document.extracted_text = extract_text(content, ext)
-        result = ai().complete("parse", {"text": document.extracted_text})
-        data = PersonaData.model_validate(result.get("data", {})).model_dump()
-        document.status = "parsed"
-        response = {
-            "document_id": document.id,
-            "status": "parsed",
-            "data": data,
-            "extracted_text": document.extracted_text,
-            "notice": "Review every field before saving. Mock mode uses section headings; no missing facts are inferred.",
-        }
-    except Exception as exc:
-        document.status = "failed"
-        document.error = (
-            exc.detail
-            if isinstance(exc, HTTPException)
-            else (
-                str(exc)
-                if isinstance(exc, ValueError)
-                else "Unable to parse this document. It may be malformed or unsupported. Use manual entry."
-            )
-        )
-        response = {
-            "document_id": document.id,
-            "status": "failed",
-            "error": document.error,
-            "data": None,
-        }
-    repo.session.flush()
+@router.post("/documents/jobs", status_code=202)
+def upload_job(file: UploadFile = File(...), repo=Depends(get_repo)):
+    document = queue_document(repo, file)
+    response = document_response(document)
+    repo.session.commit()
+    wake_document_worker()
     return response
+
+
+@router.get("/documents")
+def documents(repo=Depends(get_repo)):
+    return [
+        document_response(document)
+        for document in repo.session.scalars(
+            repo.query(UploadedDocument)
+            .order_by(UploadedDocument.created_at.desc())
+            .limit(50)
+        ).all()
+    ]
+
+
+@router.get("/documents/{id}/status")
+def document_status(id: str, repo=Depends(get_repo)):
+    return document_response(repo.get(UploadedDocument, id))
+
+
+@router.post("/documents/{id}/retry", status_code=202)
+def retry_upload(id: str, repo=Depends(get_repo)):
+    document = retry_document(repo, repo.get(UploadedDocument, id))
+    response = document_response(document)
+    repo.session.commit()
+    wake_document_worker()
+    return response
+
+
+@router.post("/documents", deprecated=True)
+def upload(file: UploadFile = File(...), repo=Depends(get_repo)):
+    """Compatibility endpoint; the result now remains available after navigation."""
+    document = queue_document(repo, file)
+    document_id = document.id
+    repo.session.commit()
+    process_document(document_id)
+    repo.session.expire_all()
+    document = repo.get(UploadedDocument, document_id)
+    deadline = monotonic() + getattr(settings, "ai_timeout_seconds", 60) + 5
+    while document.status in ("queued", "processing") and monotonic() < deadline:
+        repo.session.commit()
+        sleep(0.05)
+        repo.session.expire_all()
+        document = repo.get(UploadedDocument, document_id)
+    return document_response(document)
 
 
 @router.get("/documents/{id}/download")

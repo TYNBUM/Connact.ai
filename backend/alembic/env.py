@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, pool
 from app.config import settings
 from app.db import Base
 from app import models
+from app import auth_models
 
 
 def run():

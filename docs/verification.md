@@ -1,6 +1,29 @@
 # MVP Validation Record
 
-Validation Date: 2026-09-06. This record distinguishes actual runtime results, contract testing, and unverified sections.
+This record distinguishes actual runtime results, contract testing, and unverified sections. Older dated results are retained as history; the latest section supersedes their provider and deployment status.
+
+## 2026-09-08: Persistent people retrieval, Sequence-style writing and invitation trial
+
+- Final full backend suite: **64 passed on a temporary independent PostgreSQL database**. SQLite suite: 63 passed and one PostgreSQL-only concurrency test skipped.
+- Browser checks: **8 passed** for the isolated Mock workflow/writing suite, **1 passed** for invitation registration/login/logout and cross-account isolation, and **2 passed** for people-state recovery and stale callbacks.
+- TypeScript, production Next.js build, migrations and `alembic check` passed. Production frontend is serving at `127.0.0.1:3100` against the existing PostgreSQL backend.
+- Live providers: SerpAPI returned 10 LinkedIn search results; Apify returned five work and three education entries in a sample profile, and a separate business email in one of two email trials. Total Apify trial cost was $0.024. Apollo still returns `403 API_INACCESSIBLE`.
+- Bailian Qwen Plus/Turbo/Max each returned HTTP 200; full asynchronous writing and PDF parsing/deduplication were live-verified. Production UI generation, explicit insertion and refresh persistence passed with an independent draft.
+- Both Docker images built. Isolated containers verified frontend HTML/JS/brand resources and writable cache, backend upload-volume permissions, SQLite migration/health/draft creation, and invitation/origin guards. Compose configuration passed; the complete Compose PostgreSQL stack and public TLS deployment were not run.
+- No email was sent. Gmail OAuth and public server deployment remain outstanding. See [current delivery report](customer-ready-2026-09-08.md), [provider evidence](people-provider-verification.md), and [customer trial operations](customer-trial.md).
+
+## 2026-09-07: Google discovery → Apollo email matching
+
+This update supersedes the provider status in the original 2026-09-06 report below.
+
+- Local `.env`: people search and public sources are Live, with both supplied keys configured; AI remains Mock. Keys are excluded from Git and the local configuration is permission 600.
+- Live SerpAPI: HTTP 200 for `site:linkedin.com/in/ Investment Banking Goldman Sachs New York`; 9 unique person profiles returned, stored under SerpAPI with canonical LinkedIn URLs and Google source evidence. Google result totals are explicitly estimated.
+- Live Apollo: requested `/api/v1/people/match` using a discovered LinkedIn URL. Both the initial JSON request and the documented query-parameter format returned HTTP 403, `API_INACCESSIBLE`. Provider message explicitly states this account's Free plan does not include the endpoint. The final adapter uses the documented query-parameter format. **No real email was retrieved.**
+- Browser check: Next.js → FastAPI → PostgreSQL → SerpAPI returned 9 people; the selected person's URL was present in the drawer; Apollo's permission error appeared after clicking “Match with Apollo & get email”; results remained visible; no browser page errors. Screenshots are in local ignored `work/live-google-search.png` and `work/live-apollo-permission.png`.
+- Regression tests: successful matching on the same Contact, separate source attribution, enrichment cache, identity/edit invalidation, mismatched/missing LinkedIn URL rejection, empty-email/no-person outcomes, duplicate/spoofed URL filtering, pagination, missing keys, additional public-source lookup, and Apollo permission errors are covered with controlled HTTP responses. These tests do not prove live account email coverage.
+- Final PostgreSQL test suite: 29 passed. TypeScript and production build passed. Original Mock workflow tests remain in the suite; test configuration now explicitly excludes all real API keys.
+
+Remaining external requirement: enable `people/match` access in the Apollo account and retry email enrichment. Search already works with SerpAPI alone; enrichment failures do not fall back to Mock or cache a successful result.
 
 ## Actual Runtime Environment
 

@@ -9,6 +9,8 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     UniqueConstraint,
+    Index,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
@@ -55,12 +57,26 @@ class PersonaRevision(Scoped, Base):
 
 class UploadedDocument(Scoped, Base):
     __tablename__ = "uploaded_documents"
+    __table_args__ = (Index(
+        "uq_documents_cached_parse", "workspace_id", "content_hash", "parse_mode", "parse_provider", "parse_model", "parse_prompt_version",
+        unique=True,
+        sqlite_where=text("content_hash IS NOT NULL AND status IN ('queued', 'processing', 'parsed')"),
+        postgresql_where=text("content_hash IS NOT NULL AND status IN ('queued', 'processing', 'parsed')"),
+    ),)
     original_name: Mapped[str] = mapped_column(String(255))
     storage_key: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(30))
     error: Mapped[str | None] = mapped_column(Text)
     extracted_text: Mapped[str] = mapped_column(Text, default="")
     persona_id: Mapped[str | None] = mapped_column(ForeignKey("personas.id"))
+    parsed_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    parse_mode: Mapped[str] = mapped_column(String(15), default="legacy")
+    parse_provider: Mapped[str] = mapped_column(String(30), default="")
+    parse_model: Mapped[str] = mapped_column(String(150), default="")
+    parse_prompt_version: Mapped[str] = mapped_column(String(60), default="")
+    parse_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parse_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Contact(Scoped, Base):
@@ -129,3 +145,47 @@ class Draft(Scoped, Base):
     status: Mapped[str] = mapped_column(String(30), default="draft")
     revision: Mapped[int] = mapped_column(Integer, default=1)
     generation_provider: Mapped[str] = mapped_column(String(30), default="manual")
+    model: Mapped[str] = mapped_column(String(150), default="")
+    writing_mode: Mapped[str] = mapped_column(String(15), default="assisted")
+    length: Mapped[str] = mapped_column(String(15), default="medium")
+    cta: Mapped[str] = mapped_column(Text, default="")
+    custom_instructions: Mapped[str] = mapped_column(Text, default="")
+    evidence_ids: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class WritingJob(Scoped, Base):
+    __tablename__ = "writing_jobs"
+    __table_args__ = (Index(
+        "uq_writing_jobs_pending", "workspace_id", "draft_id", "draft_revision", "action",
+        unique=True,
+        sqlite_where=text("status IN ('queued', 'running')"),
+        postgresql_where=text("status IN ('queued', 'running')"),
+    ),)
+    draft_id: Mapped[str] = mapped_column(ForeignKey("drafts.id"), index=True)
+    draft_revision: Mapped[int] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
+    mode: Mapped[str] = mapped_column(String(15))
+    provider: Mapped[str] = mapped_column(String(30))
+    model: Mapped[str] = mapped_column(String(150))
+    prompt_version: Mapped[str] = mapped_column(String(60))
+    snapshot: Mapped[dict] = mapped_column(JSON)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PeopleJob(Scoped, Base):
+    __tablename__ = "people_jobs"
+    kind: Mapped[str] = mapped_column(String(30))
+    contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id"), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    input: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    upstream: Mapped[dict] = mapped_column(JSON, default=dict)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    retryable: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_poll_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1,5 +1,6 @@
 import hashlib, json
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import update as sql_update
 from ..models import (
     Contact,
     ContactDomainProfile,
@@ -7,6 +8,7 @@ from ..models import (
     MatchAssessment,
     PersonaRevision,
     now,
+    PeopleJob,
 )
 
 
@@ -18,6 +20,19 @@ def row(obj):
     }
 
 
+def lock_contact(repo, contact_id):
+    # A no-op UPDATE provides a transaction lock on PostgreSQL and SQLite.
+    # It preserves updated_at and scopes the lock to the authenticated workspace.
+    repo.session.execute(
+        sql_update(Contact)
+        .where(Contact.id == contact_id, Contact.workspace_id == repo.workspace_id)
+        .values(updated_at=Contact.updated_at)
+    )
+    contact = repo.get(Contact, contact_id)
+    repo.session.refresh(contact)
+    return contact
+
+
 def contact_json(repo, contact):
     data = row(contact)
     data["domains"] = {
@@ -26,6 +41,26 @@ def contact_json(repo, contact):
             ContactDomainProfile, ContactDomainProfile.contact_id == contact.id
         )
     }
+    data["professional"] = data["domains"].pop("professional", {})
+    data["jobs"] = [
+        row(j)
+        for j in sorted(
+            repo.all(PeopleJob, PeopleJob.contact_id == contact.id),
+            key=lambda x: x.created_at,
+            reverse=True,
+        )[:10]
+    ]
+    data["missing_fields"] = [
+        k
+        for k in ("title", "company", "location", "school", "email")
+        if not getattr(contact, k)
+    ]
+    data["phone"] = ""
+    data["phone_status"] = "not_requested"
+    data["missing_fields"].append("phone")
+    for key in ("experience", "education", "skills"):
+        if not data["professional"].get(key):
+            data["missing_fields"].append(key)
     data["sources"] = [
         row(e)
         for e in repo.all(SourceEvidence, SourceEvidence.contact_id == contact.id)
@@ -38,12 +73,23 @@ def contact_json(repo, contact):
 
 
 def upsert_search(repo, item):
+    item = dict(item)
+    search_evidence = item.pop("search_evidence", None)
     existing = repo.all(
         Contact,
         Contact.provider == item["provider"],
         Contact.provider_id == item["provider_id"],
     )
     if existing:
+        if item["provider"] == "serpapi" and search_evidence:
+            for evidence in repo.all(
+                SourceEvidence,
+                SourceEvidence.contact_id == existing[0].id,
+                SourceEvidence.provider == "serpapi",
+                SourceEvidence.url == item["profile_url"],
+                SourceEvidence.title == search_evidence["title"],
+            ):
+                evidence.kind = "discovery"
         return existing[0]
     sector = item.pop("sector", "")
     try:
@@ -69,10 +115,13 @@ def upsert_search(repo, item):
         title=(
             "Fictional demo profile"
             if contact.provider == "mock"
-            else "Apollo people search"
+            else (search_evidence or {}).get("title", "Apollo people search")
         ),
-        snippet=f"{contact.name} | {contact.title} | {contact.company} | {contact.location}",
-        kind="profile",
+        snippet=(search_evidence or {}).get(
+            "snippet",
+            f"{contact.name} | {contact.title} | {contact.company} | {contact.location}",
+        ),
+        kind="discovery" if contact.provider == "serpapi" else "profile",
     )
     return contact
 

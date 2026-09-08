@@ -1,7 +1,7 @@
 from ..config import settings
 from .mock import MockPeople, MockPublic
 from .apollo import ApolloProvider
-from .serpapi import SerpAPIProvider
+from .serpapi import SerpAPIProvider, SerpAPIPeople
 from .ai import MockAI, CompatibleAI
 from .base import (
     PeopleSearchProvider,
@@ -12,7 +12,7 @@ from .base import (
 
 
 def people_search() -> PeopleSearchProvider:
-    return MockPeople() if settings.people_mode == "mock" else ApolloProvider()
+    return MockPeople() if settings.people_mode == "mock" else SerpAPIPeople()
 
 
 def people_enrichment() -> PeopleEnrichmentProvider:

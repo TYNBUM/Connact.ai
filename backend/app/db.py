@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from .config import settings
 
 
@@ -45,17 +45,18 @@ class WorkspaceRepository:
             raise HTTPException(404, "Record not found in this workspace.")
         return obj
 
-    def add(self, model, **values):
-        obj = model(workspace_id=self.workspace_id, **values)
+    def add(self, model_cls, **values):
+        obj = model_cls(workspace_id=self.workspace_id, **values)
         self.session.add(obj)
         self.session.flush()
         return obj
 
 
-def get_repo():
+def get_repo(request: Request):
+    from .routers.auth import workspace_for_request
     with Session() as session:
         try:
-            yield WorkspaceRepository(session)
+            yield WorkspaceRepository(session, workspace_for_request(session, request))
             session.commit()
         except Exception:
             session.rollback()

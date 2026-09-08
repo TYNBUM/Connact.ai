@@ -1,7 +1,46 @@
 from pathlib import Path
 from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
+from pydantic import BaseModel, Field, field_validator
+
+
+class AIProviderConfig(BaseModel):
+    id: str = Field(pattern=r"^[a-z][a-z0-9_-]*$", max_length=30)
+    label: str = Field(min_length=1, max_length=80)
+    base_url: str
+    api_key_env: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$")
+    models: list[str] = Field(min_length=1)
+    protocol: Literal["compatible", "anthropic"] = "compatible"
+    token_parameter: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
+    json_mode: bool = True
+    thinking_mode: Literal["auto", "enabled", "disabled", "default"] = "auto"
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_endpoint(cls, value):
+        from urllib.parse import urlsplit
+
+        url = urlsplit(value)
+        if (
+            url.scheme not in ("http", "https")
+            or not url.hostname
+            or url.username
+            or url.password
+            or url.query
+            or url.fragment
+        ):
+            raise ValueError(
+                "Use an HTTP(S) base URL without credentials, query or fragment"
+            )
+        return value.rstrip("/")
+
+    @field_validator("models")
+    @classmethod
+    def valid_models(cls, values):
+        if any(not v.strip() or len(v.strip()) > 118 for v in values):
+            raise ValueError("Model IDs must contain 1-118 characters")
+        return list(dict.fromkeys(v.strip() for v in values))
+
 
 ROOT = (
     Path(__file__).resolve().parents[1]
@@ -23,8 +62,27 @@ class Settings(BaseSettings):
     apollo_api_key: str = ""
     serpapi_api_key: str = ""
     ai_api_key: str = ""
-    ai_base_url: str = "https://api.openai.com/v1"
-    ai_model: str = "gpt-4.1-mini"
+    ai_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    ai_model: str = "qwen-plus"
+    ai_provider: str = "bailian"
+    ai_models: str = ""
+    ai_default_model: str = ""
+    # Entries override matching presets or add a custom provider. Secrets stay server-side.
+    ai_providers: list[AIProviderConfig] = []
+    openai_api_key: str = ""
+    deepseek_api_key: str = ""
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""
+    dashscope_api_key: str = ""
+    ai_timeout_seconds: float = 60
+    apify_api_key: str = ""
+    apify_profile_actor: str = "harvestapi/linkedin-profile-scraper"
+    apify_max_charge_usd: float = 0.05
+    people_cache_hours: int = 168
+    auth_mode: Literal["local", "invite"] = "local"
+    public_origin: str = "http://127.0.0.1:3100"
+    allowed_hosts: str = "localhost,127.0.0.1,backend,testserver"
+    session_days: int = 7
     provider_calls_per_minute: int = 20
 
     @field_validator("upload_dir")

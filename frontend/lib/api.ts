@@ -14,6 +14,8 @@ export async function api<T>(
   });
   const data = await response.json();
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined")
+      window.dispatchEvent(new Event("connact-session-expired"));
     const detail = data.detail;
     throw new Error(
       typeof detail === "string"

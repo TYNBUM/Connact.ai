@@ -85,6 +85,9 @@ test("persona → search → source-based recommendation → contact → edited,
   await page
     .getByRole("button", { name: "Generate email", exact: true })
     .click();
+  await page
+    .getByRole("button", { name: "Insert suggestion", exact: true })
+    .click();
   await expect(page.getByRole("textbox", { name: "Email body" })).toContainText(
     "{{sender_name}}",
   );
@@ -108,11 +111,9 @@ test("persona → search → source-based recommendation → contact → edited,
     .getByRole("button", { name: "Preview & copy", exact: true })
     .click();
   await expect(
-    page
-      .getByRole("dialog")
-      .getByRole("heading", {
-        name: "A conversation with Ethan Brooks · " + suffix,
-      }),
+    page.getByRole("dialog").getByRole("heading", {
+      name: "A conversation with Ethan Brooks · " + suffix,
+    }),
   ).toBeVisible();
   await expect(page.locator(".preview-body")).toContainText("Taylor Browser");
   await page.getByRole("button", { name: "Copy all", exact: true }).click();
@@ -154,6 +155,9 @@ test("resume upload, rich text, independent writing language and future routes",
   await page
     .getByLabel("Upload resume", { exact: true })
     .setInputFiles("../demo/sample-resume.docx");
+  await page
+    .getByRole("button", { name: "Use parsed fields", exact: true })
+    .click();
   await expect(page.getByLabel("Full name", { exact: true })).toHaveValue(
     "Alex Morgan",
   );
@@ -184,6 +188,9 @@ test("resume upload, rich text, independent writing language and future routes",
   await page.getByLabel("Email language").selectOption("zh");
   await page
     .getByRole("button", { name: "Generate email", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Insert suggestion", exact: true })
     .click();
   await expect(page.getByRole("textbox", { name: "Email body" })).toContainText(
     "您好",
@@ -223,9 +230,7 @@ test("dashboard layout renders without horizontal page overflow", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(
-    page.getByRole("heading", { name: "Dashboard" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   await page.screenshot({ path: "../docs/dashboard.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect

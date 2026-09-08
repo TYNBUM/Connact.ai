@@ -6,8 +6,14 @@ async function proxy(
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const origin = req.headers.get("origin");
-  if (origin && !["localhost", "127.0.0.1"].includes(new URL(origin).hostname))
-    return Response.json({ detail: "Local workspace only." }, { status: 403 });
+  const allowed = process.env.PUBLIC_ORIGIN
+    ? [process.env.PUBLIC_ORIGIN.replace(/\/$/, "")]
+    : ["http://localhost:3100", "http://127.0.0.1:3100"];
+  if (origin && !allowed.includes(origin.replace(/\/$/, "")))
+    return Response.json(
+      { detail: "This origin is not allowed." },
+      { status: 403 },
+    );
   const { path } = await params;
   const base = process.env.BACKEND_URL || "http://127.0.0.1:8000";
   try {
@@ -20,6 +26,9 @@ async function proxy(
             ? { "Content-Type": req.headers.get("content-type")! }
             : {}),
           ...(origin ? { Origin: origin } : {}),
+          ...(req.headers.get("cookie")
+            ? { Cookie: req.headers.get("cookie")! }
+            : {}),
         },
         body: ["GET", "HEAD"].includes(req.method)
           ? undefined
@@ -36,6 +45,8 @@ async function proxy(
     for (const key of ["content-disposition", "x-content-type-options"])
       if (response.headers.get(key))
         headers.set(key, response.headers.get(key)!);
+    for (const cookie of response.headers.getSetCookie())
+      headers.append("set-cookie", cookie);
     return new Response(response.body, { status: response.status, headers });
   } catch {
     return Response.json(

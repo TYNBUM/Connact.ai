@@ -28,7 +28,7 @@ _lock = Lock()
 
 
 def budget(provider: str):
-    # One local worker; no Redis or background work. Every live upstream request is counted.
+    # Per-process limit across requests and background jobs. Every upstream request is counted.
     with _lock:
         calls, clock = _calls[provider], monotonic()
         while calls and calls[0] < clock - 60:
@@ -52,6 +52,20 @@ def request_json(provider, method, url, key, **kwargs):
             res = client.request(method, url, **kwargs)
         if res.status_code >= 400:
             code = 429 if res.status_code == 429 else 502
+            if provider == "Apollo" and res.status_code == 403:
+                try:
+                    reason = res.json()
+                except ValueError:
+                    reason = {}
+                if (
+                    isinstance(reason, dict)
+                    and reason.get("error_code") == "API_INACCESSIBLE"
+                ):
+                    raise HTTPException(
+                        502,
+                        "Apollo HTTP 403 / API_INACCESSIBLE: your plan does not include people/match. "
+                        "当前 Apollo 套餐未开放人物匹配与邮箱补充 API；请在 Apollo 开通该接口权限后重试。Google 搜索结果已保留。",
+                    )
             raise HTTPException(
                 code,
                 f"{provider} returned HTTP {res.status_code}. Check API access, quota and filters. No mock fallback was used.",

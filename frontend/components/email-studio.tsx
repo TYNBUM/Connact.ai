@@ -12,29 +12,27 @@ import {
   Copy,
   Check,
   Save,
-  ArrowRight,
-  AlertCircle,
+  RefreshCw,
+  X,
+  ExternalLink,
+  Download,
   Braces,
-  ArrowLeft,
 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { api, post, put, errorText } from "@/lib/api";
-import type { Draft, Contact, Preview } from "@/lib/types";
+import type {
+  Draft,
+  Contact,
+  Preview,
+  Generation,
+  WritingModels,
+} from "@/lib/types";
 import { useDraft } from "@/lib/use-draft";
-import {
-  Heading,
-  Field,
-  Badge,
-  Busy,
-  Nav,
-  Empty,
-  Drawer,
-  DateLabel,
-} from "./ui";
+import { Heading, Field, Badge, Busy, Nav, Drawer, DateLabel } from "./ui";
 import RichEditor from "./rich-editor";
 
 export default function EmailStudio() {
-  const { t, drafts, refresh, go, notify } = useApp(),
+  const { t, drafts, refresh, go, notify, guard } = useApp(),
     query = useSearchParams();
   const id = query.get("draft"),
     contact = query.get("contact"),
@@ -44,6 +42,7 @@ export default function EmailStudio() {
   async function create(cid: string | null = null, pid: string | null = null) {
     setBusy(true);
     try {
+      if (guard.current) await guard.current();
       const d = await post<Draft>("/drafts", {
         contact_id: cid,
         persona_id: pid,
@@ -57,15 +56,19 @@ export default function EmailStudio() {
     }
   }
   useEffect(() => {
-    if (contact && !id && creating.current !== contact) {
-      creating.current = contact;
+    if (contact && !id && creating.current !== `${contact}:${persona || ""}`) {
+      creating.current = `${contact}:${persona || ""}`;
       void create(contact, persona);
     }
-  }, [contact, id]);
+  }, [contact, id, persona]);
   return (
     <>
       <Heading
         title={t("Email Studio", "邮件工作室")}
+        detail={t(
+          "Each draft keeps its own brief, context, and AI suggestions.",
+          "每封草稿独立保存写作要求、背景与 AI 建议。 ",
+        )}
       >
         <button
           className="button primary"
@@ -158,45 +161,173 @@ export default function EmailStudio() {
 
 function DraftEditor({ id }: { id: string }) {
   const { t, personas, contacts, refresh, notify, config } = useApp();
-  const { draft, saveState, error, edit, flush, accept, setError } =
-    useDraft(id);
+  const {
+    draft,
+    saveState,
+    error,
+    recovered,
+    edit,
+    flush,
+    accept,
+    loadLatest,
+    setError,
+  } = useDraft(id);
   const [busy, setBusy] = useState(false),
     [preview, setPreview] = useState<Preview | null>(null),
     [extra, setExtra] = useState<Contact | null>(null),
-    [showVariables, setShowVariables] = useState(false);
+    [showVariables, setShowVariables] = useState(false),
+    [models, setModels] = useState<WritingModels | null>(null),
+    [modelError, setModelError] = useState(""),
+    [jobs, setJobs] = useState<Generation[]>([]),
+    [jobsError, setJobsError] = useState(""),
+    [jobsVersion, setJobsVersion] = useState(0),
+    [showHistory, setShowHistory] = useState(false);
+  const active = useRef(true);
   useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    setExtra(null);
     if (draft?.contact_id && !contacts.some((c) => c.id === draft.contact_id))
       api<Contact>("/contacts/" + draft.contact_id)
-        .then(setExtra)
-        .catch((e) => setError(errorText(e)));
-  }, [draft?.contact_id, contacts]);
+        .then((c) => {
+          if (!cancelled) setExtra(c);
+        })
+        .catch((e) => {
+          if (!cancelled) setError(errorText(e));
+        });
+    return () => {
+      cancelled = true;
+    };
+  }, [draft?.contact_id, contacts, setError]);
+  useEffect(() => {
+    let cancelled = false;
+    api<WritingModels>("/ai/models")
+      .then((m) => {
+        if (!cancelled) {
+          setModels(m);
+          setModelError("");
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setModelError(errorText(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config?.ai_mode, jobsVersion]);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    async function readJobs() {
+      try {
+        const latest = await api<Generation[]>(
+          "/drafts/" + id + "/generations",
+          { signal: controller.signal },
+        );
+        if (cancelled) return;
+        setJobs(latest);
+        setJobsError("");
+        if (latest.some((j) => j.status === "queued" || j.status === "running"))
+          timer = setTimeout(() => void readJobs(), 1800);
+      } catch (e) {
+        if (!cancelled) {
+          setJobsError(errorText(e));
+          timer = setTimeout(() => void readJobs(), 5000);
+        }
+      }
+    }
+    void readJobs();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [id, jobsVersion]);
   async function generate(action = "generate") {
     setBusy(true);
     setError("");
     try {
       const saved = await flush();
-      if (!saved) return;
-      const d = await post<Draft>("/drafts/" + id + "/generate", {
+      if (!saved || !active.current) return;
+      const job = await post<Generation>("/drafts/" + id + "/generations", {
         action,
         revision: saved.revision,
       });
-      accept(d);
+      if (!active.current) return;
+      setJobs((previous) => [job, ...previous.filter((j) => j.id !== job.id)]);
+      setJobsVersion((v) => v + 1);
+      notify(
+        t(
+          "AI is working. You can edit or leave this page; the suggestion is saved with this draft.",
+          "AI 正在生成。可继续编辑或离开页面，建议将保存在这封草稿中。",
+        ),
+      );
+      await refresh();
+    } catch (e) {
+      if (active.current) {
+        setError(errorText(e));
+        setJobsVersion((v) => v + 1);
+      }
+    } finally {
+      if (active.current) setBusy(false);
+    }
+  }
+  async function useSuggestion(job: Generation) {
+    setBusy(true);
+    setError("");
+    try {
+      const saved = await flush();
+      if (!saved || !active.current) return;
+      const updated = await post<Draft>(
+        `/drafts/${id}/generations/${job.id}/accept`,
+        { revision: saved.revision },
+      );
+      if (!active.current) return;
+      accept(updated);
+      setJobsVersion((v) => v + 1);
       await refresh();
       notify(
-        config?.ai_mode === "mock"
-          ? t(
-              "Mock writing suggestion created. Review and make it your own.",
-              "模拟写作建议已生成，请检查并按需修改。",
-            )
-          : t(
-              "Writing suggestion created. Review all facts before use.",
-              "写作建议已生成，请检查事实。",
-            ),
+        t(
+          "Suggestion inserted. Review the facts and edit before use.",
+          "建议已插入，请检查事实并按需修改。",
+        ),
       );
     } catch (e) {
-      setError(errorText(e));
+      if (active.current) setError(errorText(e));
     } finally {
-      setBusy(false);
+      if (active.current) setBusy(false);
+    }
+  }
+  async function discardSuggestion(job: Generation) {
+    setBusy(true);
+    try {
+      const updated = await post<Generation>(
+        `/drafts/${id}/generations/${job.id}/discard`,
+      );
+      if (active.current)
+        setJobs((previous) =>
+          previous.map((j) => (j.id === job.id ? updated : j)),
+        );
+    } catch (e) {
+      if (active.current) setError(errorText(e));
+    } finally {
+      if (active.current) setBusy(false);
+    }
+  }
+  async function reloadDraft() {
+    setBusy(true);
+    try {
+      await loadLatest();
+    } catch (e) {
+      if (active.current) setError(errorText(e));
+    } finally {
+      if (active.current) setBusy(false);
     }
   }
   async function showPreview() {
@@ -270,31 +401,98 @@ function DraftEditor({ id }: { id: string }) {
     extra && !contacts.some((c) => c.id === extra.id)
       ? [extra, ...contacts]
       : contacts;
+  const recipient = allContacts.find((c) => c.id === draft.contact_id);
+  const pending = jobs.some(
+    (j) => j.status === "queued" || j.status === "running",
+  );
+  const visibleJobs = jobs.filter(
+    (j) => showHistory || (j.status !== "accepted" && j.status !== "discarded"),
+  );
+  const modelOptions = models?.models || [];
+  const selectedModel = modelOptions.find(
+    (m) => m.id === (draft.model || models?.default_model),
+  );
+  const selectedModelAvailable =
+    !!selectedModel && (selectedModel.available ?? !!models?.configured);
+  const modelGroups = Array.from(
+    new Set(
+      modelOptions.map((m) => m.provider_label || models?.provider || "AI"),
+    ),
+  );
+  const canGenerate =
+    (draft.writing_mode === "prompt"
+      ? !!draft.custom_instructions?.trim()
+      : draft.writing_mode === "template"
+        ? !!draft.body_html.replace(/<[^>]*>/g, "").trim()
+        : !!draft.purpose.trim()) &&
+    selectedModelAvailable &&
+    !busy &&
+    !pending;
   return (
     <section className="editor-main">
-      <div className="panel editor-context">
+      <div className="panel editor-context writing-brief">
         <div className="section-head">
           <h2>
             <Sparkles size={17} />
-            {t("Give your email some context", "为邮件补充背景")}
+            {t("Writing brief", "写作要求")}
           </h2>
-          <Badge tone={draft.generation_provider === "mock" ? "amber" : "gray"}>
-            {draft.generation_provider === "mock"
-              ? "MOCK WRITING"
-              : draft.language === "en"
-                ? "ENGLISH EMAIL"
-                : "中文邮件"}
+          <Badge tone={config?.ai_mode === "mock" ? "amber" : "gray"}>
+            {config?.ai_mode === "mock"
+              ? t("DEMO AI", "模拟 AI")
+              : selectedModel?.provider_label || models?.provider || "AI"}
           </Badge>
         </div>
+        <div
+          className="writing-mode-tabs"
+          role="group"
+          aria-label={t("Writing mode", "写作方式")}
+        >
+          {(["assisted", "prompt", "template"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={(draft.writing_mode || "assisted") === mode}
+              disabled={busy}
+              onClick={() => edit({ writing_mode: mode })}
+            >
+              {mode === "assisted"
+                ? t("Assisted", "引导写作")
+                : mode === "prompt"
+                  ? t("Prompt", "自定义 Prompt")
+                  : t("Template", "手写模板")}
+            </button>
+          ))}
+        </div>
+        <p className="writing-mode-hint">
+          {draft.writing_mode === "prompt"
+            ? t(
+                "Write your own prompt in Additional instructions. Choose a contact whenever you want a personalized preview.",
+                "在补充要求中编写自定义 Prompt。可随时选择联系人，生成个性化预览。",
+              )
+            : draft.writing_mode === "template"
+              ? t(
+                  "Write your reusable template in the editor below, with variables if needed. Generate a personalized preview for a selected contact.",
+                  "在下方正文编辑器编写可复用模板，可插入变量。选择联系人后可生成个性化预览。",
+                )
+              : t(
+                  "Describe your context and goal. Add a contact and persona whenever useful, then review the generated preview.",
+                  "描述背景与目标，可随时添加联系人和画像，再审核生成预览。",
+                )}
+        </p>
         <fieldset disabled={busy}>
           <div className="form-grid">
             <Field label={t("To · Contact", "收件人 · 联系人")}>
               <select
                 value={draft.contact_id || ""}
-                onChange={(e) => edit({ contact_id: e.target.value || null })}
+                onChange={(e) =>
+                  edit({ contact_id: e.target.value || null, evidence_ids: [] })
+                }
               >
                 <option value="">
-                  {t("Select a contact (optional)", "选择联系人（可选）")}
+                  {t(
+                    "No contact · independent draft",
+                    "不绑定联系人 · 独立草稿",
+                  )}
                 </option>
                 {allContacts.map((c) => (
                   <option value={c.id} key={c.id}>
@@ -309,16 +507,16 @@ function DraftEditor({ id }: { id: string }) {
                 onChange={(e) => edit({ persona_id: e.target.value || null })}
               >
                 <option value="">
-                  {t("No persona · write manually", "无画像 · 自由写作")}
+                  {t("No persona · use the brief", "不绑定画像 · 使用写作要求")}
                 </option>
                 {personas.map((p) => (
                   <option value={p.id} key={p.id}>
-                    {p.label}
+                    {p.label} · v{p.version}
                   </option>
                 ))}
               </select>
             </Field>
-            <Field label={t("Writing starting point", "写作起点")}>
+            <Field label={t("Writing starting point", "写作场景")}>
               <select
                 value={draft.starting_point}
                 onChange={(e) => edit({ starting_point: e.target.value })}
@@ -326,6 +524,8 @@ function DraftEditor({ id }: { id: string }) {
                 <option>Networking</option>
                 <option>Informational Interview</option>
                 <option>Recruiting</option>
+                <option>Follow-up</option>
+                <option>Introduction</option>
               </select>
             </Field>
             <Field label={t("Email language", "邮件语言")}>
@@ -348,44 +548,227 @@ function DraftEditor({ id }: { id: string }) {
               className="full"
             >
               <textarea
-                rows={2}
+                rows={3}
                 value={draft.purpose}
                 onChange={(e) => edit({ purpose: e.target.value })}
                 placeholder={t(
-                  "e.g. Learn about the transition from investment banking to private equity.",
-                  "例如：了解如何从投资银行转向私募股权。",
+                  "Describe your background, what you offer or want to learn, and why this conversation matters.",
+                  "说明您的背景、可提供的价值或希望了解的问题，以及联系的原因。 ",
+                )}
+              />
+            </Field>
+            <Field
+              label={t("Call to action", "期望对方采取的行动")}
+              className="full"
+            >
+              <input
+                value={draft.cta || ""}
+                onChange={(e) => edit({ cta: e.target.value })}
+                placeholder={t(
+                  "e.g. A 15-minute conversation next week",
+                  "例如：下周安排 15 分钟交流",
+                )}
+              />
+            </Field>
+            <Field label={t("Writing tone", "写作语气")}>
+              <select
+                aria-label="Writing tone"
+                value={draft.tone}
+                onChange={(e) => edit({ tone: e.target.value })}
+              >
+                <option value="professional">
+                  {t("Professional", "专业")}
+                </option>
+                <option value="warm">{t("Warm", "友好")}</option>
+                <option value="concise">{t("Concise", "简洁")}</option>
+              </select>
+            </Field>
+            <Field label={t("Email length", "邮件长度")}>
+              <select
+                value={draft.length || "medium"}
+                onChange={(e) =>
+                  edit({ length: e.target.value as Draft["length"] })
+                }
+              >
+                <option value="short">{t("Short", "短")}</option>
+                <option value="medium">{t("Medium", "中")}</option>
+                <option value="long">{t("Long", "长")}</option>
+              </select>
+            </Field>
+            <Field label={t("AI model", "AI 模型")} className="full">
+              <select
+                value={draft.model || ""}
+                onChange={(e) => edit({ model: e.target.value })}
+                disabled={!models}
+              >
+                <option value="">
+                  {t("Workspace default", "工作区默认")}
+                  {models?.default_model ? " · " + models.default_model : ""}
+                </option>
+                {draft.model &&
+                  !modelOptions.some((m) => m.id === draft.model) && (
+                    <option value={draft.model}>
+                      {draft.model} · {t("unavailable", "不可用")}
+                    </option>
+                  )}
+                {modelGroups.map((group) => (
+                  <optgroup label={group} key={group}>
+                    {modelOptions
+                      .filter(
+                        (m) =>
+                          (m.provider_label || models?.provider || "AI") ===
+                          group,
+                      )
+                      .map((m) => (
+                        <option
+                          value={m.id}
+                          key={m.id}
+                          disabled={m.available === false}
+                        >
+                          {m.label}
+                          {m.available === false
+                            ? " · " + t("Not configured", "未配置")
+                            : ""}
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
+            </Field>
+            <Field
+              label={t("Additional instructions", "补充要求")}
+              className="full"
+            >
+              <textarea
+                rows={2}
+                value={draft.custom_instructions || ""}
+                onChange={(e) => edit({ custom_instructions: e.target.value })}
+                placeholder={t(
+                  "e.g. Avoid clichés. Refer to a shared school only when supported by evidence.",
+                  "例如：避免套话，仅在证据支持时提及共同学校。 ",
                 )}
               />
             </Field>
           </div>
-          {!draft.persona_id && (
-            <div className="notice small">
-              <Sparkles size={14} />
+          <details
+            className="writing-evidence"
+            open={!!recipient?.sources.length}
+          >
+            <summary>
+              {t("Personalization evidence", "个性化证据")}{" "}
+              <Badge>{(draft.evidence_ids || []).length}</Badge>
+            </summary>
+            <p>
               {t(
-                "Add a persona for background-based personalization. You can still write or generate a neutral introduction.",
-                "选择画像可获得基于背景的个性化内容。也可继续手动写作或生成中性介绍。",
+                "Select sources the AI may cite, alongside the linked contact’s basic fields and your persona. Sources can be incomplete; verify every claim.",
+                "选择允许 AI 使用的来源，同时参考所绑定联系人的基础字段及您的画像。来源可能不完整，请逐项核对事实。 ",
               )}
-              <Nav href="/personas">{t("Add background", "补充背景")}</Nav>
+            </p>
+            {recipient?.sources.length ? (
+              recipient.sources.map((source) => (
+                <div className="writing-evidence-row" key={source.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={(draft.evidence_ids || []).includes(source.id)}
+                      onChange={(e) =>
+                        edit({
+                          evidence_ids: e.target.checked
+                            ? [...(draft.evidence_ids || []), source.id]
+                            : (draft.evidence_ids || []).filter(
+                                (value) => value !== source.id,
+                              ),
+                        })
+                      }
+                    />
+                    <span>
+                      <strong>{source.title || source.provider}</strong>
+                      <small>
+                        {source.provider} ·{" "}
+                        <DateLabel value={source.retrieved_at} />
+                      </small>
+                      <p>
+                        {source.snippet ||
+                          t("No source excerpt available.", "暂无来源摘要。")}
+                      </p>
+                    </span>
+                  </label>
+                  {/^(https?:)\/\//i.test(source.url) && (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={t("Open evidence source", "打开证据来源")}
+                    >
+                      <ExternalLink size={14} />
+                    </a>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p>
+                {t(
+                  "Link a contact with sources to select evidence. You can generate from your brief alone.",
+                  "绑定带有来源的联系人后可选择证据。也可只根据写作要求生成。",
+                )}
+              </p>
+            )}
+          </details>
+          {modelError && (
+            <div className="notice small" role="alert">
+              {modelError}
+              <button
+                className="text-button"
+                onClick={() => setJobsVersion((v) => v + 1)}
+              >
+                {t("Retry models", "重试模型列表")}
+              </button>
+            </div>
+          )}
+          {models?.mode === "mock" && (
+            <div className="notice small">
+              {t(
+                "Demo mode: all model choices use simulated output.",
+                "模拟模式：所有模型选项均使用模拟输出。",
+              )}
+            </div>
+          )}
+          {models && !selectedModelAvailable && (
+            <div className="notice small">
+              {t(
+                "The selected model is unavailable or missing its provider API key. Choose a configured model. Your draft and brief can still be saved.",
+                "所选模型不可用或尚未配置对应厂商的 API Key，请选择已配置的模型。草稿和写作要求仍可保存。",
+              )}
             </div>
           )}
           <div className="generate-row">
             <span>
               {t(
-                "Email language is independent of interface language.",
-                "邮件语言不受界面语言影响。",
+                "Saved with this draft. Contacts and personas are optional and can be changed at any time.",
+                "随草稿保存。联系人和画像均可选，可随时更换。",
               )}
             </span>
             <button
               className="button primary"
-              disabled={busy || !draft.purpose.trim()}
+              disabled={!canGenerate}
               onClick={() => void generate()}
             >
-              {busy ? <Busy /> : <Sparkles size={16} />}{" "}
-              {t("Generate email", "生成邮件")}
+              {busy || pending ? <Busy /> : <Sparkles size={16} />}
+              {pending
+                ? t("Generating…", "生成中…")
+                : t("Generate email", "生成邮件")}
             </button>
           </div>
         </fieldset>
       </div>
+      {recovered && (
+        <div className="notice writing-recovery" role="status">
+          {t(
+            "Unsaved work recovered from this tab. Review it and save to the server.",
+            "已恢复此标签页中未保存的内容，请检查后保存至服务端。",
+          )}
+        </div>
+      )}
       {error && (
         <div className="error-panel" role="alert">
           {error}
@@ -399,11 +782,7 @@ function DraftEditor({ id }: { id: string }) {
           <button
             className="button small-button"
             disabled={busy}
-            onClick={() =>
-              void api<Draft>("/drafts/" + id)
-                .then(accept)
-                .catch((e) => setError(errorText(e)))
-            }
+            onClick={() => void reloadDraft()}
           >
             {t(
               "Load latest (discard local edits)",
@@ -412,6 +791,170 @@ function DraftEditor({ id }: { id: string }) {
           </button>
         </div>
       )}
+      <section
+        className="panel writing-suggestions"
+        aria-label={t("AI suggestions", "AI 建议")}
+      >
+        <div className="section-head">
+          <h2>
+            <Sparkles size={17} />
+            {t("AI suggestions", "AI 建议")}
+          </h2>
+          <button
+            className="text-button"
+            onClick={() => setJobsVersion((v) => v + 1)}
+            aria-label={t("Refresh suggestions", "刷新建议")}
+          >
+            <RefreshCw size={15} />
+          </button>
+        </div>
+        {jobsError && (
+          <div className="notice" role="alert">
+            {t("Suggestions could not be refreshed: ", "暂时无法刷新建议：")}
+            {jobsError}
+          </div>
+        )}
+        {!visibleJobs.length && (
+          <p className="writing-empty">
+            {t(
+              "Generate a suggestion, review it here, then insert it into your email. Your current text stays editable.",
+              "生成的建议会先在此预览，审核后再插入邮件。当前正文可继续编辑。",
+            )}
+          </p>
+        )}
+        {visibleJobs.map((job) => {
+          const stale =
+            job.draft_revision !== draft.revision || saveState !== "saved";
+          const working = job.status === "queued" || job.status === "running";
+          return (
+            <article
+              className="writing-suggestion"
+              key={job.id}
+              data-testid="writing-suggestion"
+              data-status={job.status}
+            >
+              <div className="writing-suggestion-meta">
+                <Badge tone={job.status === "failed" ? "amber" : "gray"}>
+                  {working
+                    ? t("IN PROGRESS", "生成中")
+                    : job.status === "succeeded"
+                      ? t("READY TO REVIEW", "待审核")
+                      : job.status === "accepted"
+                        ? t("INSERTED", "已插入")
+                        : job.status === "discarded"
+                          ? t("DISCARDED", "已放弃")
+                          : t("FAILED", "失败")}
+                </Badge>
+                <span>
+                  {job.model} · {t("Revision", "版本")} {job.draft_revision} ·{" "}
+                  <DateLabel value={job.created_at} />
+                </span>
+              </div>
+              {working && (
+                <p className="writing-pending">
+                  <Busy />
+                  {t(
+                    "Working in the background. You can leave this page and return to this draft later.",
+                    "正在后台生成，可离开页面，稍后返回此草稿查看。",
+                  )}
+                </p>
+              )}
+              {job.status === "failed" && (
+                <p className="writing-job-error">
+                  {job.error ||
+                    t(
+                      "Generation failed. Review the brief and retry.",
+                      "生成失败，请检查写作要求后重试。",
+                    )}
+                </p>
+              )}
+              {job.result && (
+                <div className="writing-result">
+                  <h3>{job.result.subject}</h3>
+                  <div
+                    dangerouslySetInnerHTML={{ __html: job.result.body_html }}
+                  />
+                </div>
+              )}
+              {job.status === "succeeded" && stale && (
+                <p className="writing-stale">
+                  {t(
+                    "This draft changed after generation started. Generate a new suggestion to use the latest version; this result will not overwrite your edits.",
+                    "开始生成后草稿已变更，请基于最新版本重新生成。此建议不会覆盖您的修改。",
+                  )}
+                </p>
+              )}
+              {(job.status === "succeeded" || job.status === "failed") && (
+                <div className="writing-suggestion-actions">
+                  {job.status === "succeeded" && (
+                    <>
+                      <button
+                        className="button primary"
+                        disabled={busy || stale}
+                        onClick={() => void useSuggestion(job)}
+                      >
+                        <Check size={15} />
+                        {t("Insert suggestion", "插入建议")}
+                      </button>
+                      <button
+                        className="button"
+                        disabled={busy || !job.result}
+                        onClick={() =>
+                          job.result &&
+                          void navigator.clipboard
+                            .writeText(
+                              `Subject: ${job.result.subject}\n\n${new DOMParser().parseFromString(job.result.body_html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h[1-6])>/gi, "</$1>\n\n"), "text/html").body.textContent?.trim() || ""}`,
+                            )
+                            .then(() =>
+                              notify(t("Suggestion copied.", "建议已复制。")),
+                            )
+                            .catch((e) => setError(errorText(e)))
+                        }
+                      >
+                        <Copy size={15} />
+                        {t("Copy suggestion", "复制建议")}
+                      </button>
+                    </>
+                  )}
+                  <button
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => void discardSuggestion(job)}
+                  >
+                    <X size={15} />
+                    {t("Discard", "放弃")}
+                  </button>
+                  {(stale || job.status === "failed") && (
+                    <button
+                      className="text-button"
+                      disabled={!canGenerate}
+                      onClick={() => void generate(job.action)}
+                    >
+                      <RefreshCw size={15} />
+                      {t(
+                        "Regenerate from current draft",
+                        "基于当前草稿重新生成",
+                      )}
+                    </button>
+                  )}
+                </div>
+              )}
+            </article>
+          );
+        })}
+        {jobs.some(
+          (j) => j.status === "accepted" || j.status === "discarded",
+        ) && (
+          <button
+            className="text-button writing-history"
+            onClick={() => setShowHistory(!showHistory)}
+          >
+            {showHistory
+              ? t("Hide history", "隐藏历史")
+              : t("Show suggestion history", "查看建议历史")}
+          </button>
+        )}
+      </section>
       <div className="panel composer">
         <div className="composer-head">
           <span>
@@ -456,29 +999,19 @@ function DraftEditor({ id }: { id: string }) {
         <div className="refine-bar">
           <button
             className="text-button"
-            disabled={busy}
+            disabled={!canGenerate || !draft.body_html}
             onClick={() => void generate("shorten")}
           >
             <Scissors size={15} />
             {t("Shorten", "缩短")}
           </button>
-          <select
-            aria-label="Writing tone"
-            disabled={busy}
-            value={draft.tone}
-            onChange={(e) => edit({ tone: e.target.value })}
-          >
-            <option value="professional">{t("Professional", "专业")}</option>
-            <option value="warm">{t("Warm", "友好")}</option>
-            <option value="concise">{t("Concise", "简洁")}</option>
-          </select>
           <button
             className="text-button"
-            disabled={busy}
+            disabled={!canGenerate || !draft.body_html}
             onClick={() => void generate("tone")}
           >
             <SlidersHorizontal size={15} />
-            {t("Apply tone", "调整语气")}
+            {t("Rewrite with brief", "按写作要求改写")}
           </button>
           <button
             className="text-button variables-toggle"
@@ -536,8 +1069,8 @@ function DraftEditor({ id }: { id: string }) {
       <div className="studio-footnote">
         <Check size={14} />
         {t(
-          "Saved securely to your local workspace. No mailbox connection required.",
-          "保存至本地工作区，无需连接邮箱。",
+          "Drafts, briefs, and suggestions are saved to this workspace. Preview and copy when ready.",
+          "草稿、写作要求与建议均保存至当前工作区，完成后可预览与复制。",
         )}
       </div>
       {preview && (
@@ -603,6 +1136,34 @@ function DraftEditor({ id }: { id: string }) {
                 <Copy size={15} />
                 {t("Copy body", "复制正文")}
               </button>
+              <a
+                className="button"
+                href={
+                  preview.can_mark_ready && preview.recipient_email
+                    ? `/api/drafts/${id}/export.eml`
+                    : undefined
+                }
+                aria-disabled={
+                  !preview.can_mark_ready || !preview.recipient_email || busy
+                }
+                onClick={(event) => {
+                  event.preventDefault();
+                  if (
+                    !preview.can_mark_ready ||
+                    !preview.recipient_email ||
+                    busy
+                  )
+                    return;
+                  void flush()
+                    .then(() => {
+                      window.location.assign(`/api/drafts/${id}/export.eml`);
+                    })
+                    .catch((e) => setError(errorText(e)));
+                }}
+              >
+                <Download size={15} />
+                {t("Download email (.eml)", "下载邮件（.eml）")}
+              </a>
               <button
                 className="button dark"
                 onClick={() => void copy("both", preview)}

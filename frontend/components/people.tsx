@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Search,
@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { api, post, put, errorText } from "@/lib/api";
-import type { Contact, Assessment, Draft } from "@/lib/types";
+import type { Contact, Assessment, Draft, PeopleJob } from "@/lib/types";
 import {
   Heading,
   Field,
@@ -52,6 +52,8 @@ export function PeopleSearch() {
     [personaId, setPersonaId] = useState(personas[0]?.id || ""),
     [results, setResults] = useState<Contact[]>([]),
     [total, setTotal] = useState(0),
+    [hasMore, setHasMore] = useState(false),
+    [totalIsEstimate, setTotalIsEstimate] = useState(false),
     [page, setPage] = useState(1),
     [searched, setSearched] = useState(false),
     [busy, setBusy] = useState(false),
@@ -59,6 +61,77 @@ export function PeopleSearch() {
     [error, setError] = useState(""),
     [detail, setDetail] = useState<Contact | null>(null);
   const [applied, setApplied] = useState(filters);
+  const [jobId, setJobId] = useState("");
+  const [history, setHistory] = useState<PeopleJob[]>([]);
+  const [searchJob, setSearchJob] = useState<PeopleJob | null>(null);
+  const [restoring, setRestoring] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    api<PeopleJob[]>("/finance/search/jobs")
+      .then((jobs) => {
+        if (!alive) return;
+        setHistory(jobs);
+        if (jobs[0]) setJobId(jobs[0].id);
+      })
+      .catch((e) => {
+        if (alive) setError(errorText(e));
+      })
+      .finally(() => {
+        if (alive) setRestoring(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!jobId) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    let first = true;
+    async function poll() {
+      try {
+        const job = await api<PeopleJob>("/people/jobs/" + jobId);
+        if (!alive) return;
+        setSearchJob(job);
+        const submitted = Object.fromEntries(
+          Object.keys(filters).map((key) => [
+            key,
+            String(job.input[key] || ""),
+          ]),
+        ) as typeof filters;
+        setApplied(submitted);
+        if (first) {
+          setFilters(submitted);
+          first = false;
+        }
+        if (job.status === "succeeded") {
+          setResults(job.result.items || []);
+          setTotal(job.result.total || 0);
+          setHasMore(!!job.result.has_more);
+          setTotalIsEstimate(!!job.result.total_is_estimate);
+          setPage(job.result.page || 1);
+          setSearched(true);
+          setBusy(false);
+        } else if (job.status === "failed") {
+          setError(job.error);
+          setBusy(false);
+        } else {
+          setBusy(true);
+          timer = setTimeout(poll, 1600);
+        }
+      } catch (e) {
+        if (alive) {
+          setError(errorText(e));
+          setBusy(false);
+        }
+      }
+    }
+    void poll();
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [jobId]);
   async function recommend(rows = results) {
     if (!personaId || !rows.length) return;
     setRecommending(true);
@@ -87,15 +160,22 @@ export function PeopleSearch() {
     setBusy(true);
     setError("");
     try {
-      const r = await post<{ items: Contact[]; total: number }>(
-        "/finance/search",
+      const r = await post<{ job: PeopleJob; cached: boolean }>(
+        "/finance/search/jobs",
         { ...useFilters, page: n, per_page: 10 },
       );
-      setResults(r.items);
-      setTotal(r.total);
-      setPage(n);
-      setSearched(true);
-      setApplied(useFilters);
+      setJobId(r.job.id);
+      setSearchJob(r.job);
+      setHistory(await api<PeopleJob[]>("/finance/search/jobs"));
+      if (r.job.status === "succeeded") {
+        setResults(r.job.result.items || []);
+        setTotal(r.job.result.total || 0);
+        setHasMore(!!r.job.result.has_more);
+        setTotalIsEstimate(!!r.job.result.total_is_estimate);
+        setPage(n);
+        setSearched(true);
+        setApplied(useFilters);
+      }
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -109,9 +189,7 @@ export function PeopleSearch() {
   };
   return (
     <>
-      <Heading
-        title={t("People Search", "人员搜索")}
-      />
+      <Heading title={t("People Search", "人员搜索")} />
       <section className="panel search-panel">
         <div className="section-head">
           <h2>
@@ -119,7 +197,7 @@ export function PeopleSearch() {
             {t("Find your people", "筛选人员")}
           </h2>
           <Badge tone={config?.people_mode === "mock" ? "amber" : "green"}>
-            {config?.people_mode === "mock" ? "MOCK DATA" : "APOLLO"}
+            {config?.people_mode === "mock" ? "MOCK DATA" : "GOOGLE · SERPAPI"}
           </Badge>
         </div>
         <form
@@ -187,7 +265,10 @@ export function PeopleSearch() {
                 ))}
               </select>
             </Field>
-            <button className="button primary" disabled={busy || recommending}>
+            <button
+              className="button primary"
+              disabled={restoring || busy || recommending}
+            >
               {busy ? <Busy /> : <Search size={16} />}{" "}
               {t("Search people", "搜索人员")}
             </button>
@@ -196,8 +277,8 @@ export function PeopleSearch() {
         <p className="filter-note">
           {config?.people_mode === "live"
             ? t(
-                "Company names and finance areas use Apollo keyword matching; use a company domain for precise organization filtering. Some names and locations may be limited until enrichment.",
-                "机构名称和金融领域映射为 Apollo 关键词；机构域名用于精确筛选。补充前部分姓名与地区可能不完整。",
+                "Find public LinkedIn profiles through Google, then request work and education details from Apify or an email from Apollo independently. Search filters are keywords, not verified profile facts.",
+                "Google 发现 LinkedIn 公开资料后，可分别请求 Apify 补全履历教育、Apollo 获取邮箱。筛选项是搜索关键词，并非已核实的人物信息。",
               )
             : t(
                 "16 fictional profiles for testing. All filters work on this demo dataset.",
@@ -210,6 +291,58 @@ export function PeopleSearch() {
           {error}
         </div>
       )}
+      {history.length > 0 && (
+        <div className="contacts-toolbar">
+          <Field label={t("Saved searches", "已保存搜索")}>
+            <select
+              aria-label="Saved searches"
+              value={jobId}
+              onChange={(e) => {
+                setError("");
+                setJobId(e.target.value);
+              }}
+            >
+              {history.map((j) => (
+                <option value={j.id} key={j.id}>
+                  {String(
+                    j.input.company ||
+                      j.input.title ||
+                      j.input.keywords ||
+                      t("All people", "全部人员"),
+                  )}{" "}
+                  · {new Date(j.created_at).toLocaleString()} · {j.status}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {busy && (
+            <span className="muted">
+              <Busy />{" "}
+              {t(
+                "Searching in background. You can switch pages and return.",
+                "后台搜索中，可切换页面后返回。",
+              )}
+            </span>
+          )}
+          {searchJob?.status === "failed" && searchJob.retryable && (
+            <button
+              className="button small-button"
+              onClick={async () => {
+                try {
+                  setError("");
+                  await post("/people/jobs/" + searchJob.id + "/retry");
+                  setJobId("");
+                  setTimeout(() => setJobId(searchJob.id), 0);
+                } catch (e) {
+                  setError(errorText(e));
+                }
+              }}
+            >
+              {t("Retry search", "重试搜索")}
+            </button>
+          )}
+        </div>
+      )}
       <div className="results-header">
         <div>
           <h2>
@@ -219,7 +352,16 @@ export function PeopleSearch() {
           </h2>
           {searched && (
             <span className="muted">
-              {total} {t("people found", "位符合条件的人员")}
+              {totalIsEstimate ? (
+                t(
+                  `${results.length} profiles on this page · Google estimate: ${total}`,
+                  `本页 ${results.length} 位人员 · Google 估计约 ${total} 条结果`,
+                )
+              ) : (
+                <>
+                  {total} {t("people found", "位符合条件的人员")}
+                </>
+              )}
             </span>
           )}
         </div>
@@ -262,33 +404,6 @@ export function PeopleSearch() {
               setResults((old) => old.map((x) => (x.id === c.id ? c : x)))
             }
           />
-          <div className="pagination">
-            <span>
-              {(page - 1) * 10 + 1}–{Math.min(page * 10, total)} {t("of", "/")}{" "}
-              {total}
-            </span>
-            <div>
-              <button
-                aria-label="Previous page"
-                className="icon-button"
-                disabled={page === 1 || busy}
-                onClick={() => void search(page - 1, applied)}
-              >
-                <ChevronLeft size={17} />
-              </button>
-              <span>
-                {t("Page", "第")} {page}
-              </span>
-              <button
-                aria-label="Next page"
-                className="icon-button"
-                disabled={page * 10 >= total || page >= 500 || busy}
-                onClick={() => void search(page + 1, applied)}
-              >
-                <ChevronRight size={17} />
-              </button>
-            </div>
-          </div>
         </>
       ) : (
         <Empty
@@ -299,6 +414,37 @@ export function PeopleSearch() {
           )}
         />
       )}
+      {searched && (
+        <div className="pagination">
+          <span>
+            {t(
+              `${results.length} profiles on this page`,
+              `本页 ${results.length} 位人员`,
+            )}
+          </span>
+          <div>
+            <button
+              aria-label="Previous page"
+              className="icon-button"
+              disabled={page === 1 || busy}
+              onClick={() => void search(page - 1, applied)}
+            >
+              <ChevronLeft size={17} />
+            </button>
+            <span>
+              {t("Page", "第")} {page}
+            </span>
+            <button
+              aria-label="Next page"
+              className="icon-button"
+              disabled={!hasMore || page >= 500 || busy}
+              onClick={() => void search(page + 1, applied)}
+            >
+              <ChevronRight size={17} />
+            </button>
+          </div>
+        </div>
+      )}
       <div className="source-footnote">
         <Link2 size={14} />
         {t(
@@ -308,6 +454,7 @@ export function PeopleSearch() {
       </div>
       {detail && (
         <ContactDrawer
+          key={detail.id}
           contact={detail}
           personaId={personaId}
           onClose={() => setDetail(null)}
@@ -487,12 +634,16 @@ function EmailStatus({ contact: c }: { contact: Contact }) {
   const label = c.email
     ? c.provider === "mock"
       ? t("Mock address", "模拟邮箱")
-      : t("Address found", "已取得邮箱")
+      : c.email_status === "verified"
+        ? t("Provider reports verified", "服务商标记已验证")
+        : t("Address found · unverified", "已取得邮箱 · 未验证")
     : ["available", "mock_available"].includes(c.email_status)
       ? t("Available to enrich", "可尝试补充")
-      : c.email_status === "unavailable"
-        ? t("Unavailable", "暂无邮箱")
-        : t("Not requested", "尚未补充");
+      : c.email_status === "not_found"
+        ? t("No Apollo match", "Apollo 未匹配到此人")
+        : c.email_status === "unavailable"
+          ? t("Unavailable", "暂无邮箱")
+          : t("Not requested", "尚未补充");
   return (
     <Badge
       tone={
@@ -527,9 +678,7 @@ export function Contacts() {
   );
   return (
     <>
-      <Heading
-        title={t("Contacts", "联系人")}
-      >
+      <Heading title={t("Contacts", "联系人")}>
         <button className="button primary" onClick={() => setManual(true)}>
           <Plus size={16} />
           {t("Add contact", "添加联系人")}
@@ -584,6 +733,7 @@ export function Contacts() {
       )}
       {detail && (
         <ContactDrawer
+          key={detail.id}
           contact={detail}
           onClose={() => setDetail(null)}
           onUpdate={setDetail}
@@ -614,22 +764,97 @@ export function ContactDrawer({
   onUpdate: (c: Contact) => void;
 }) {
   const { t, locale, personas, refresh, notify, go, config } = useApp();
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  const close = () => {
+    active.current = false;
+    onClose();
+  };
   const [c, setC] = useState(contact),
     [editing, setEditing] = useState(false),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
-    [pid, setPid] = useState(personaId || personas[0]?.id || "");
+    [pid, setPid] = useState(personaId || personas[0]?.id || ""),
+    [emailProvider, setEmailProvider] = useState<"email" | "email_apify">(
+      "email_apify",
+    );
   useEffect(() => {
     let active = true;
     api<Contact>("/contacts/" + contact.id)
       .then((c) => {
         if (active) setC(c);
       })
-      .catch((e) => setError(errorText(e)));
+      .catch((e) => {
+        if (active) setError(errorText(e));
+      });
     return () => {
       active = false;
     };
   }, [contact.id]);
+  const pendingJobs = (c.jobs || []).filter((j) =>
+    ["queued", "running", "waiting"].includes(j.status),
+  );
+  const pendingKey = pendingJobs.map((j) => j.id).join(",");
+  useEffect(() => {
+    if (!pendingKey) return;
+    let alive = true;
+    const timer = setInterval(() => {
+      api<Contact>("/contacts/" + contact.id)
+        .then((updated) => {
+          if (!alive || !active.current) return;
+          setC(updated);
+          onUpdate(updated);
+          if (
+            !(updated.jobs || []).some((j) =>
+              ["queued", "running", "waiting"].includes(j.status),
+            )
+          )
+            void refresh();
+        })
+        .catch((e) => {
+          if (alive) setError(errorText(e));
+        });
+    }, 1800);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [contact.id, pendingKey]);
+  async function startJob(
+    kind: "profile" | "email" | "email_apify",
+    force = false,
+  ) {
+    setBusy(kind);
+    setError("");
+    try {
+      const r = await post<{ cached: boolean }>("/contacts/" + c.id + "/jobs", {
+        kind,
+        force,
+      });
+      if (!active.current) return;
+      if (r.cached)
+        notify(
+          t(
+            "Using the saved result or existing background task.",
+            "已复用保存的结果或现有后台任务。",
+          ),
+        );
+      const updated = await api<Contact>("/contacts/" + c.id);
+      if (!active.current) return;
+      setC(updated);
+      onUpdate(updated);
+      await refresh();
+    } catch (e) {
+      if (active.current) setError(errorText(e));
+    } finally {
+      if (active.current) setBusy("");
+    }
+  }
   async function action(name: string) {
     setBusy(name);
     setError("");
@@ -644,6 +869,7 @@ export function ContactDrawer({
         const r = await post<{ already_saved: boolean }>(
           "/contacts/" + c.id + "/save",
         );
+        if (!active.current) return;
         notify(
           r.already_saved
             ? t("Already saved. No duplicate created.", "已存在，未重复保存。")
@@ -651,13 +877,14 @@ export function ContactDrawer({
         );
       } else await post("/contacts/" + c.id + "/" + name);
       const updated = await api<Contact>("/contacts/" + c.id);
+      if (!active.current) return;
       setC(updated);
       onUpdate(updated);
       await refresh();
     } catch (e) {
-      setError(errorText(e));
+      if (active.current) setError(errorText(e));
     } finally {
-      setBusy("");
+      if (active.current) setBusy("");
     }
   }
   const selectedPersona = personas.find((p) => p.id === pid);
@@ -673,6 +900,7 @@ export function ContactDrawer({
         contact={c}
         onClose={() => setEditing(false)}
         onDone={(updated) => {
+          if (!active.current) return;
           setC(updated);
           onUpdate(updated);
           setEditing(false);
@@ -680,7 +908,7 @@ export function ContactDrawer({
       />
     );
   return (
-    <Drawer title={t("Contact details", "联系人详情")} onClose={onClose}>
+    <Drawer title={t("Contact details", "联系人详情")} onClose={close}>
       <div className="drawer-profile">
         <Avatar name={c.name} large />
         <Badge tone={c.provider === "mock" ? "amber" : "blue"}>
@@ -734,6 +962,13 @@ export function ContactDrawer({
           <dd>
             {c.email || "—"} <EmailStatus contact={c} />
           </dd>
+          <dt>{t("Phone", "电话")}</dt>
+          <dd>
+            {t(
+              "Not requested · phone lookup is not enabled",
+              "未请求 · 暂未启用电话号码获取",
+            )}
+          </dd>
           <dt>{t("School", "学校")}</dt>
           <dd>{c.school || t("Not provided", "未提供")}</dd>
           <dt>{t("Profile", "资料链接")}</dt>
@@ -747,23 +982,213 @@ export function ContactDrawer({
             )}
           </dd>
         </dl>
-        {c.provider !== "manual" && (
+        {c.provider !== "mock" && (
+          <Field label={t("Email provider", "邮箱查找服务商")}>
+            <select
+              aria-label="Email provider"
+              value={emailProvider}
+              onChange={(e) =>
+                setEmailProvider(e.target.value as "email" | "email_apify")
+              }
+            >
+              <option value="email_apify">
+                Apify · {t("Independent email search", "独立查找邮箱")}
+              </option>
+              <option value="email">
+                Apollo · {t("API access required", "需要 API 套餐权限")}
+              </option>
+            </select>
+          </Field>
+        )}
+        {(c.provider !== "manual" ||
+          c.profile_url.includes("linkedin.com/in/")) && (
           <button
             className="button small-button"
-            disabled={!!busy}
-            onClick={() => void action("enrich")}
+            disabled={
+              !!busy ||
+              pendingJobs.some(
+                (j) => j.kind === "email" || j.kind === "email_apify",
+              )
+            }
+            onClick={() =>
+              void startJob(c.provider === "mock" ? "email" : emailProvider)
+            }
           >
-            {busy === "enrich" ? <Busy /> : <Plus size={14} />}{" "}
-            {t("Enrich contact / email", "补充联系人或邮箱")}
+            {["email", "email_apify"].includes(busy) ||
+            pendingJobs.some(
+              (j) => j.kind === "email" || j.kind === "email_apify",
+            ) ? (
+              <Busy />
+            ) : (
+              <Plus size={14} />
+            )}{" "}
+            {c.provider === "mock"
+              ? t("Enrich contact / email", "补充联系人或邮箱")
+              : emailProvider === "email_apify"
+                ? t("Find email with Apify", "使用 Apify 查找邮箱")
+                : t("Match with Apollo & get email", "Apollo 匹配并获取邮箱")}
           </button>
         )}
         <p className="muted small">
           {t(
-            "One contact per request. Apollo enrichment may use provider credits; cached results are reused.",
-            "每次仅补充一人。Apollo 可能消耗额度，已补充结果会复用。",
+            "One person per request. Email search uses the selected provider and may use credits. Results are cached for 7 days; email coverage is not guaranteed. If Apollo denies API access, select Apify.",
+            "每次一人，由所选服务商独立查找并可能消耗额度，结果缓存 7 天，不保证取得邮箱。Apollo 接口受限时可选择 Apify。",
           )}
         </p>
       </section>
+      <section className="drawer-section">
+        <h3>{t("Professional profile", "履历与教育")}</h3>
+        {c.provider !== "mock" && (
+          <button
+            className="button small-button"
+            disabled={!!busy || pendingJobs.some((j) => j.kind === "profile")}
+            onClick={() => void startJob("profile")}
+          >
+            {pendingJobs.some((j) => j.kind === "profile") ? (
+              <Busy />
+            ) : (
+              <Plus size={14} />
+            )}{" "}
+            {t("Get profile details", "补全履历教育")} · Apify
+          </button>
+        )}
+        {c.professional?.retrieved_at && (
+          <p className="muted small">
+            Apify · <DateLabel value={c.professional.retrieved_at} /> ·{" "}
+            {t("Public profile, may be incomplete", "公开资料，可能不完整")}
+          </p>
+        )}
+        {c.professional?.summary && (
+          <p style={{ whiteSpace: "pre-wrap" }}>{c.professional.summary}</p>
+        )}
+        <h4>{t("Experience", "工作履历")}</h4>
+        {c.professional?.experience?.length ? (
+          c.professional.experience.map((x, i) => (
+            <div className="evidence" key={i}>
+              <strong>{x.title || t("Title unavailable", "未提供职位")}</strong>
+              <p>{x.company}</p>
+              <small>
+                {[x.start_date, x.end_date].filter(Boolean).join(" – ")}{" "}
+                {x.location}
+              </small>
+              {x.description && (
+                <details>
+                  <summary>{t("Details", "详情")}</summary>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{x.description}</p>
+                </details>
+              )}
+            </div>
+          ))
+        ) : (
+          <p className="muted">
+            {t(
+              "Experience not retrieved or not publicly available.",
+              "尚未取得履历或公开资料未提供。",
+            )}
+          </p>
+        )}
+        <h4>{t("Education", "教育经历")}</h4>
+        {c.professional?.education?.length ? (
+          c.professional.education.map((x, i) => (
+            <div className="evidence" key={i}>
+              <strong>{x.school}</strong>
+              <p>{[x.degree, x.field_of_study].filter(Boolean).join(" · ")}</p>
+              <small>
+                {[x.start_date, x.end_date].filter(Boolean).join(" – ")}
+              </small>
+            </div>
+          ))
+        ) : (
+          <p className="muted">
+            {t(
+              "Education not retrieved or not publicly available.",
+              "尚未取得教育经历或公开资料未提供。",
+            )}
+          </p>
+        )}
+        {!!c.professional?.skills?.length && (
+          <>
+            <h4>{t("Skills", "技能")}</h4>
+            <div className="tags">
+              {c.professional.skills.map((skill) => (
+                <Badge key={skill}>{skill}</Badge>
+              ))}
+            </div>
+          </>
+        )}
+        {!!c.missing_fields?.length && (
+          <p className="muted small">
+            {t("Missing information", "缺失信息")}：
+            {c.missing_fields
+              .map(
+                (key) =>
+                  ({
+                    title: t("title", "职位"),
+                    company: t("company", "机构"),
+                    location: t("location", "地区"),
+                    school: t("school", "学校"),
+                    email: t("email", "邮箱"),
+                    phone: t("phone", "电话"),
+                    experience: t("experience", "履历"),
+                    education: t("education", "教育"),
+                    skills: t("skills", "技能"),
+                  })[key] || key,
+              )
+              .join("、")}
+          </p>
+        )}
+      </section>
+      {!!c.jobs?.length && (
+        <section className="drawer-section">
+          <h3>{t("Background tasks", "后台任务")}</h3>
+          <p className="muted small">
+            {t(
+              "Tasks and results are saved. You can leave this page.",
+              "任务和结果自动保存，可以离开此页面。",
+            )}
+          </p>
+          {c.jobs.slice(0, 5).map((j) => (
+            <div className="evidence" key={j.id}>
+              <strong>
+                {j.kind === "profile"
+                  ? t("Apify profile", "Apify 履历教育")
+                  : j.kind === "email_apify"
+                    ? t("Apify email", "Apify 邮箱")
+                    : t("Apollo email", "Apollo 邮箱")}
+              </strong>{" "}
+              ·{" "}
+              <Badge>
+                {
+                  {
+                    queued: t("Queued", "排队中"),
+                    running: t("Running", "执行中"),
+                    waiting: t("Fetching profile", "获取资料中"),
+                    succeeded: t("Complete", "已完成"),
+                    failed: t("Failed", "失败"),
+                  }[j.status]
+                }
+              </Badge>
+              {j.error && <p role="alert">{j.error}</p>}
+              {j.status === "failed" && j.retryable && (
+                <button
+                  className="button small-button"
+                  onClick={async () => {
+                    try {
+                      await post("/people/jobs/" + j.id + "/retry");
+                      const updated = await api<Contact>("/contacts/" + c.id);
+                      if (active.current) setC(updated);
+                    } catch (e) {
+                      setError(errorText(e));
+                    }
+                  }}
+                >
+                  {t("Retry task", "重试任务")}
+                </button>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
       <section className="drawer-section">
         <h3>
           <Sparkles size={16} />
@@ -820,7 +1245,7 @@ export function ContactDrawer({
             <small>
               {s.provider.toUpperCase()} · <DateLabel value={s.retrieved_at} />{" "}
               ·{" "}
-              {s.kind === "unverified_lead"
+              {["unverified_lead", "discovery"].includes(s.kind)
                 ? t("Unverified lead", "待核实线索")
                 : t("Profile evidence", "资料依据")}
             </small>
@@ -884,6 +1309,17 @@ function ContactForm({
   onDone: (c: Contact) => void;
 }) {
   const { t, refresh } = useApp();
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  const close = () => {
+    active.current = false;
+    onClose();
+  };
   const [data, setData] = useState({
       name: contact?.name || "",
       title: contact?.title || "",
@@ -913,11 +1349,11 @@ function ContactForm({
         ? await put<Contact>("/contacts/" + contact.id, body)
         : await post<Contact>("/contacts", body);
       await refresh();
-      onDone(c);
+      if (active.current) onDone(c);
     } catch (e) {
-      setError(errorText(e));
+      if (active.current) setError(errorText(e));
     } finally {
-      setBusy(false);
+      if (active.current) setBusy(false);
     }
   }
   return (
@@ -927,7 +1363,7 @@ function ContactForm({
           ? t("Edit contact", "编辑联系人")
           : t("Add a contact", "添加联系人")
       }
-      onClose={onClose}
+      onClose={close}
     >
       <form className="contact-form" onSubmit={save}>
         <p className="muted">
@@ -977,7 +1413,7 @@ function ContactForm({
           </Field>
         </div>
         <div className="form-footer">
-          <button type="button" className="button" onClick={onClose}>
+          <button type="button" className="button" onClick={close}>
             {t("Cancel", "取消")}
           </button>
           <button className="button primary" disabled={busy}>

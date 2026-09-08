@@ -233,7 +233,7 @@ def test_workspace_boundaries_and_origin(client):
 
 def test_live_missing_credentials_never_fallback(client, monkeypatch):
     monkeypatch.setattr(settings, "people_mode", "live")
-    monkeypatch.setattr(settings, "apollo_api_key", "")
+    monkeypatch.setattr(settings, "serpapi_api_key", "")
     r = client.post("/api/finance/search", json={})
     assert r.status_code == 503 and "Live" in r.text
 

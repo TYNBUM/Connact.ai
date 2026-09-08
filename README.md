@@ -1,10 +1,12 @@
 # Connact.ai
 
-A runnable Phase 1 MVP built with Next.js, React, TypeScript, Tiptap, FastAPI, SQLAlchemy, Alembic, and PostgreSQL.
+A runnable networking and AI email-writing workspace with persistent background jobs, optional invitation accounts, and Next.js, React, TypeScript, Tiptap, FastAPI, SQLAlchemy, Alembic, and PostgreSQL.
 
 Implemented: resume parsing or manually created persona → people search → evidence-based recommendations → save contact → generate and edit email → auto-save → final variable preview → copy content.
 
-Does not include Gmail login, sending, auto-follow-up, sending queue, or scheduler. Future modules only have a clear Coming Soon page.
+Includes live SerpAPI discovery, Apify professional profiles and optional work-email lookup, Bailian multi-model writing, independent saved personas/contacts/drafts, asynchronous suggestions, and `.eml` export. Gmail OAuth, in-app sending and automated sequences are not implemented.
+
+See [September 8 delivery and validation](docs/customer-ready-2026-09-08.md), [customer trial setup](docs/customer-trial.md), and [Apollo Sequence design observations](docs/apollo-sequence-writing.md).
 
 ## Launch
 
@@ -66,7 +68,7 @@ cd frontend
 npm run dev
 ```
 
-This development mode is only for local personal workspaces: no full authentication, session, or multi-user permission system. Compose only maps to `127.0.0.1`; the backend also validates Host and Origin. **Do not use this as a public deployment authentication scheme, and do not expose it via a public reverse proxy.**
+Default `AUTH_MODE=local` is a personal development workspace and must stay bound to localhost. Optional `AUTH_MODE=invite` adds invitation registration, password login, expiring/revocable HttpOnly sessions, and a separate server-derived workspace for every customer. Use the [invitation trial deployment guide](docs/customer-trial.md) for HTTPS hosting. Run one backend process; workers and rate limits are not distributed.
 
 ## Demo and Usage
 
@@ -89,15 +91,15 @@ All keys are only placed in the root directory `.env`, not in the browser or Git
 
 | Service | Mock | Live Mode Settings |
 | --- | --- | --- |
-| People Search / Email Enrichment | `PEOPLE_MODE=mock` | `PEOPLE_MODE=live` + `APOLLO_API_KEY` |
+| People Search / Email Enrichment | `PEOPLE_MODE=mock` | `PEOPLE_MODE=live` + `SERPAPI_API_KEY` (search), `APIFY_API_KEY` (profiles/work email), `APOLLO_API_KEY` (optional Apollo email) |
 | Public-Profile Evidence | `PUBLIC_SEARCH_MODE=mock` | `PUBLIC_SEARCH_MODE=live` + `SERPAPI_API_KEY` |
-| Persona Extraction / Recommendations / Writing | `AI_MODE=mock` | `AI_MODE=live` + `AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL` |
+| Persona Extraction / Recommendations / Writing | `AI_MODE=mock` | `AI_MODE=live` + per-vendor API keys; legacy `AI_API_KEY` / `AI_BASE_URL` also supported |
 
-AI interfaces use a configurable Chat Completions-compatible format, requiring support for `response_format: json_object` and `max_completion_tokens`. The default configuration example points to OpenAI; the model name can be modified according to the models available on your account. Missing keys return 503, upstream permission/request errors return explicit 502/429; no mock responses are returned secretly.
+AI interfaces use a configurable Chat Completions-compatible format, requiring support for `response_format: json_object` and `max_completion_tokens`. The default configuration example points to Bailian; the model name can be modified according to the models available on your account. Missing keys return 503, upstream permission/request errors return explicit 502/429; no mock responses are returned secretly.
 
-- Apollo Search: `POST /api/v1/mixed_people/api_search`. Job title → `person_titles`, region → `person_locations`, company domain → `q_organization_domains_list`, company name/financial field/keyword → `q_keywords`. **Company name and financial field are keyword matches, not exact industry classifications.** If a name or region is hidden by the provider, it will retain its restricted status and not be inferred or filled in.
-- Apollo Email Enrichment: Separate `POST /api/v1/people/match`; no request for private emails or phone numbers. Whether an email is returned depends on real data and account permissions, and may consume Apollo quota.
-- SerpAPI: `GET /search.json`, save up to 3 public search results; retain links, summaries, and acquisition dates, and mark unverified evidence. Do not automatically merge schools or shared experiences based on this.
+- People Search: SerpAPI `GET /search.json`, `engine=google`, query `site:linkedin.com/in/` plus title/company/location/finance area/keywords. Returns up to 10 Google hits per page, filters out non-person URLs and duplicates, and saves each person's canonical LinkedIn URL. Google total is an estimate, not a count of verified people; pagination follows Google's next-page signal.
+- Apollo Email Matching: Select a person and click **Match with Apollo & get email**. The backend sends their LinkedIn URL to `POST /api/v1/people/match`. No Apollo People Search call precedes discovery. Existing Apollo-origin contacts can still enrich by Apollo ID. No request for personal emails or phone numbers. A different/missing returned LinkedIn URL or low/none match confidence is rejected without changing contact data. No match and matched-but-no-email have distinct states.
+- Evidence: Google title/snippet/link remain unverified SerpAPI evidence; search filters are never copied into company/location/sector facts. Apollo adds separate enrichment evidence on the same Contact. Identity or email edits invalidate the enrichment cache. Additional public-source lookup remains available through `PUBLIC_SEARCH_MODE`, with up to 3 results per request.
 - Max 10 people per page; max 5 recommendations per request. Emails and public-profile evidence are supplemented by users clicking individually. Recommendations for the same persona version/contact snapshot reuse cache; email enrichment cache is reused. Each real service has a default maximum of 20 calls per minute, with limits enforced on the server side, single-process operation.
 - Mock AI is a reproducible rule-based generator with clear markings, not a call to a real large model. Mock resume extraction extracts based on Chinese and English section titles; if the layout is not standard, it may only extract partial fields, requiring manual input from the original text. It does not fabricate missing professional information.
 
@@ -105,9 +107,11 @@ Official documentation (as of 2026-09-06): [Apollo Search](https://docs.apollo.i
 
 ## Collaboration Design Between Apollo and LinkedIn Public-Profile Evidence
 
-Apollo provides structured people search and on-demand email enrichment; SerpAPI retrieves LinkedIn public-profile evidence through Google search, supplementing professional background clues. Apollo's name, organization, or profile URL is used to locate LinkedIn; verified LinkedIn information is used to assist Apollo matching and enrichment. Results from both sources are associated with the same Contact, with sources, timestamps, and conflicts preserved separately. Search summaries can only be marked as unverified evidence and cannot automatically confirm the same person, overwrite fields, or be used for alumni statements. This is the target design of dual-source collaboration: the current MVP still uses a general Google query and has not yet implemented LinkedIn-targeted search, reverse matching, or automatic cross-verification.
+The implemented sequence is **SerpAPI Google discovery → canonical LinkedIn URL → saved Contact**, with separate optional **Apify profile retrieval**, **Apollo/Apify work-email retrieval**, and **AI drafting** actions. Search does not automatically enrich every result; open the desired person and request their email. The canonical LinkedIn URL is the identity key, and returning to the same search reuses the Contact without discarding a previously enriched email.
 
-SerpAPI is a search interface, and LinkedIn is the source of public-profile evidence. Target query examples are `site:linkedin.com/in/ "name" "organization"`, executed through SerpAPI's Google Search API, without using LinkedIn login or direct LinkedIn API calls. Coverage of the search depends on whether the public page is indexed; search hits, identity verification, and fact confirmation are recorded separately.
+SerpAPI searches Google-indexed public pages; it is not a direct LinkedIn API integration. The headline and snippet can be incomplete or stale. Apollo's returned profile URL must match before structured name, title, employer, location and email are attached. A URL match is identity consistency, not independent verification of every biographical claim or email deliverability.
+
+On 2026-09-07, live Google discovery returned 9 unique profiles for Goldman Sachs / Investment Banking / New York. Apollo was called with a discovered profile but returned HTTP 403 `API_INACCESSIBLE`: this account's Free plan excludes `people/match`. The app preserves search results and displays the permission error; real email retrieval remains blocked by account access. See [verification details](docs/verification.md).
 
 ## Code Boundaries and Data Relationships
 
@@ -149,7 +153,7 @@ Drafts associate contacts and personas, recording persona version and optimistic
 
 Uploads are only allowed for PDF/DOCX, 8 MB, PDF with 30 pages, and extracted text with 50,000 characters; encrypted/damaged/empty-text PDFs will fail, and no OCR is performed currently. Storage uses random filenames, private directories, and file permissions, with no public static file routing. Downloads must be through document IDs within the workspace scope.
 
-Future Gmail, Inbox, and Campaign modules can reference the existing Contacts and Drafts directly. This phase does not include placeholder sending queues, Redis, schedulers, or fake account-connection logic.
+Future Gmail, Inbox, and Campaign modules can reference existing Contacts and Drafts directly. PostgreSQL stores background people tasks, writing suggestions and resume parsing results; single-process workers execute them. No email-send queue or automatic sequences exist.
 
 ## Verification
 
@@ -169,8 +173,28 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-See [docs/verification.md](docs/verification.md) for the exact verification scope and results. The Apollo, SerpAPI, and AI live adapters have contract tests, but no live API keys were provided, so live-provider end-to-end verification is not claimed. Docker was unavailable on the verification machine, so Compose containers were not tested; the local PostgreSQL, FastAPI, and Next.js stack was started and verified.
+See [docs/verification.md](docs/verification.md) for the exact verification scope and results. The adapters have contract tests. Live Google discovery has been verified; Apollo email retrieval is blocked by the account plan (HTTP 403). On 2026-09-08, Bailian Qwen Plus/Turbo/Max calls and the asynchronous generation-to-acceptance flow were verified. See the dated delivery report for details. Frontend/backend Docker images and isolated containers were subsequently verified; the complete Compose stack and public hosting remain unverified. See [customer trial verification](docs/customer-trial.md). The local PostgreSQL, FastAPI, and Next.js stack was started and verified.
 
 ## Project Naming and Design Documents
 
 Product name is uniformly **Connact.ai**. See [Naming Guidelines](docs/naming.md); the latest [Design Delivery Package](outputs/connact-ai-design-package/README.md) includes Word, a bilingual offline Demo, the feature roadmap, and four phased prompts. A complete Chinese-language snapshot is retained at `outputs/connact-ai-design-package-zh-CN.zip`.
+
+### Multi-provider AI model selection
+
+The writing selector separates the API service from the model author. **One existing
+Bailian MaaS key supports Qwen, DeepSeek, Kimi, GLM, and MiniMax through the same
+Bailian endpoint**; separate original-vendor keys are needed only for direct routes.
+The `Bailian MaaS` group reuses the configured Bailian `AI_API_KEY` when the official
+endpoint matches exactly, or uses `DASHSCOPE_API_KEY`. MiniMax retains its required
+thinking mode. Mock mode remains explicitly simulated for every model choice.
+
+The default list contains only Bailian models and the existing Qwen Plus/Turbo/Max
+options. Earlier direct-provider presets and duplicate Qwen entries were removed;
+other endpoints require explicit `AI_PROVIDERS` configuration. Set
+`AI_DEFAULT_MODEL=bailian/deepseek-v4-flash`
+to use Bailian DeepSeek as the workspace default, or choose a model per draft.
+`AI_PROVIDERS` overrides model lists and endpoints. Existing drafts remain supported.
+On 2026-09-08 the existing Bailian key returned 249 catalog entries; small JSON calls
+succeeded for Qwen3.8-Flash, DeepSeek V4 Flash, Kimi K3, GLM 5.2 and MiniMax-M2.5.
+Catalog visibility alone does not mean every model or third-party service is enabled.
+See [configuration and verification](docs/ai-model-providers.md).

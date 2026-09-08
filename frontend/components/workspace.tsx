@@ -27,6 +27,8 @@ import { Dashboard, Finance, ComingSoon } from "./overview";
 import Personas from "./personas";
 import { PeopleSearch, Contacts } from "./people";
 import EmailStudio from "./email-studio";
+import AuthGate from "./auth-gate";
+import { post } from "@/lib/api";
 
 const main = [
   ["/", "Dashboard", "总览", LayoutDashboard],
@@ -44,7 +46,8 @@ const later = [
 ] as const;
 function Shell() {
   const path = usePathname(),
-    { t, locale, setLocale, config, error, loading, refresh } = useApp();
+    { t, locale, setLocale, config, error, loading, refresh, guard, notify } =
+      useApp();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   useEffect(() => {
     const active = document.documentElement.dataset.theme;
@@ -91,7 +94,11 @@ function Shell() {
           <span className="workspace-monogram">P</span>
           <div>
             {t("Personal workspace", "个人工作区")}
-            <small>{t("Local workspace", "本地工作区")}</small>
+            <small>
+              {config?.auth_mode === "invite"
+                ? t("Private workspace", "独立工作区")
+                : t("Local workspace", "本地工作区")}
+            </small>
           </div>
           <ChevronDown size={14} />
         </div>
@@ -155,9 +162,25 @@ function Shell() {
           </Nav>
           <div className="account">
             <span className="workspace-monogram">P</span>
-            <div>
-              {t("Personal account", "个人账户")}
-            </div>
+            <div>{t("Personal account", "个人账户")}</div>
+            {config?.auth_mode === "invite" && (
+              <button
+                onClick={async () => {
+                  try {
+                    if (guard.current) await guard.current();
+                    await post("/auth/logout");
+                    sessionStorage.clear();
+                    window.location.assign("/");
+                  } catch (e) {
+                    notify(
+                      e instanceof Error ? e.message : "Unable to sign out.",
+                    );
+                  }
+                }}
+              >
+                {t("Sign out", "退出")}
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -214,7 +237,10 @@ function Shell() {
             <span>
               {config.people_mode === "mock"
                 ? t("Fictional demo contacts.", "联系人为虚构演示数据。")
-                : t("Apollo search enabled.", "已启用 Apollo 搜索。")}{" "}
+                : t(
+                    "Google discovery · public profiles · email enrichment.",
+                    "Google 找人 · 公开档案补全 · 邮箱获取。",
+                  )}{" "}
               {t("AI:", "AI：")}{" "}
               {config.ai_mode === "mock"
                 ? t("Mock · rule-based", "模拟 · 规则生成")
@@ -263,8 +289,10 @@ function Shell() {
 }
 export default function Workspace() {
   return (
-    <AppProvider>
-      <Shell />
-    </AppProvider>
+    <AuthGate>
+      <AppProvider>
+        <Shell />
+      </AppProvider>
+    </AuthGate>
   );
 }

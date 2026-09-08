@@ -2556,7 +2556,11 @@ textarea,
 }
 .main-shell main {
   background:
-    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--accent-purple) 5%, transparent), transparent 28rem),
+    radial-gradient(
+      circle at 100% 0,
+      color-mix(in srgb, var(--accent-purple) 5%, transparent),
+      transparent 28rem
+    ),
     var(--bg);
 }
 input,
@@ -2758,7 +2762,11 @@ td small,
 .explore-card,
 .finance-banner {
   color: var(--text-secondary);
-  background: linear-gradient(135deg, var(--surface-accent), color-mix(in srgb, #9333ea 8%, var(--surface)));
+  background: linear-gradient(
+    135deg,
+    var(--surface-accent),
+    color-mix(in srgb, #9333ea 8%, var(--surface))
+  );
   border-color: var(--accent-soft);
 }
 .explore-card h2,
@@ -2899,5 +2907,278 @@ thead {
     display: block;
     width: 34px;
     height: 34px;
+  }
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+.auth-card {
+  width: min(440px, 100%);
+  padding: 36px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+}
+.auth-card h1 {
+  margin: 28px 0 8px;
+  font-size: 28px;
+}
+.auth-card p {
+  color: var(--muted);
+}
+.auth-card form,
+.auth-card label {
+  display: grid;
+  gap: 10px;
+}
+.auth-card form {
+  margin: 26px 0 16px;
+  gap: 18px;
+}
+.auth-card input {
+  width: 100%;
+  min-height: 42px;
+}
+.auth-card small {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.auth-card .error-text {
+  color: #c84545;
+}
+
+/* Independent writing brief and persistent AI suggestions. */
+.writing-brief .section-head h2,
+.writing-suggestions .section-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.writing-evidence {
+  margin-top: 20px;
+  padding: 16px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.writing-evidence summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.writing-evidence > p,
+.writing-evidence-row p,
+.writing-evidence-row small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.writing-evidence > p {
+  margin: 12px 0 0;
+}
+.writing-evidence-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+.writing-evidence-row label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.writing-evidence-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin-top: 3px;
+  flex-shrink: 0;
+  accent-color: var(--accent-strong);
+}
+.writing-evidence-row strong,
+.writing-evidence-row small {
+  display: block;
+}
+.writing-evidence-row strong {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.writing-evidence-row p {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+.writing-evidence-row > a {
+  color: var(--accent-strong);
+  padding: 3px;
+}
+.writing-suggestions {
+  margin-top: 20px;
+}
+.writing-suggestions > .section-head {
+  padding: 17px 23px;
+}
+.writing-empty {
+  color: var(--muted);
+  padding: 0 23px 20px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.writing-suggestion {
+  padding: 20px 23px;
+  border-top: 1px solid var(--line);
+}
+.writing-suggestion-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.writing-suggestion-meta > span:last-child {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.writing-pending {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.writing-pending svg {
+  flex-shrink: 0;
+}
+.writing-result {
+  padding: 18px;
+  margin: 16px 0;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.85;
+}
+.writing-result h3 {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 14px;
+}
+.writing-result p {
+  margin: 0 0 12px;
+}
+.writing-result p:last-child {
+  margin-bottom: 0;
+}
+.writing-suggestion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.writing-stale,
+.writing-job-error {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.writing-stale {
+  border-left: 3px solid #d6a541;
+  padding-left: 12px;
+}
+.writing-history {
+  margin: 0 23px 18px;
+}
+.writing-recovery {
+  margin-top: 16px;
+}
+@media (max-width: 600px) {
+  .writing-suggestion,
+  .writing-suggestions > .section-head {
+    padding: 16px;
+  }
+  .writing-suggestion-actions > .button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .writing-evidence {
+    padding: 12px;
+  }
+}
+.writing-mode-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 16px 23px 0;
+}
+.writing-mode-tabs button {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 12px;
+}
+.writing-mode-tabs button[aria-pressed="true"] {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.writing-mode-hint {
+  margin: 14px 23px 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.studio-layout > .editor-main {
+  min-width: 0;
+}
+.editor-main .editor-toolbar {
+  flex-wrap: wrap;
+}
+.writing-brief .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.copy-actions a[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+@media (max-width: 700px) {
+  .writing-brief .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .writing-mode-tabs {
+    padding: 14px 16px 0;
+  }
+  .writing-mode-tabs button {
+    padding: 9px 6px;
+  }
+  .editor-main .composer-head {
+    padding: 14px;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+  .editor-main .subject-line {
+    padding: 10px 14px;
+  }
+  .editor-main .editor-toolbar small {
+    display: none;
   }
 }

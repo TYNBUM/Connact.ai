@@ -49,6 +49,11 @@ class ContactInput(BaseModel):
         return value
 
 
+class ContactJobInput(BaseModel):
+    kind: Literal["profile", "email", "email_apify"]
+    force: bool = False
+
+
 class SearchInput(BaseModel):
     title: str = Field("", max_length=200)
     company: str = Field("", max_length=200)
@@ -81,6 +86,12 @@ class DraftInput(BaseModel):
         "Networking"
     )
     tone: Literal["professional", "warm", "concise"] = "professional"
+    model: str = Field("", max_length=150)
+    writing_mode: Literal["assisted", "prompt", "template"] = "assisted"
+    length: Literal["short", "medium", "long"] = "medium"
+    cta: str = Field("", max_length=2000)
+    custom_instructions: str = Field("", max_length=6000)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=20)
     subject: str = Field("", max_length=1000)
     body_html: str = Field("<p></p>", max_length=60000)
     status: Literal["draft", "ready"] = "draft"
@@ -89,4 +100,8 @@ class DraftInput(BaseModel):
 
 class GenerateInput(BaseModel):
     action: Literal["generate", "shorten", "tone"] = "generate"
-    revision: int
+    revision: int = Field(ge=1)
+
+
+class AcceptGenerationInput(BaseModel):
+    revision: int = Field(ge=1)
