@@ -2,6 +2,16 @@
 
 使用同一地区的两个 Free Docker Web Service 和一个 Free PostgreSQL：
 
+## 当前试用实例（2026-09-08）
+
+- 网站：<https://connact-ai.onrender.com>
+- 后端：<https://connact-ai-api.onrender.com>；健康检查 `/api/health`。
+- 地区：Singapore。前端、后端、PostgreSQL 均为 Free。
+- 数据库：`connact-ai-db`，Render 显示到期日为 2026-10-08。
+- 两个 Web Service 使用账号已连接的 GitHub `TYNBUM/Connact.ai`，跟踪 `main`，分别以 `frontend`、`backend` 为根目录自动部署。
+- 已验证：网站 HTTP 200；后端和前端代理健康检查返回 PostgreSQL 正常；会话处于邀请登录模式；未登录访问配置返回 401，未允许的 Origin 返回 403。
+- 首次上线尚未导入提供商 API Key、尚未配置首次注册邮箱与邀请码；这些完成前不能视为 AI/查人端到端验收通过。
+
 | 服务 | Root Directory | Dockerfile | 环境配置 |
 | --- | --- | --- | --- |
 | Connact.ai 前端 | `frontend` | `./Dockerfile` | `BACKEND_URL` 指向后端 HTTPS 地址，`PORT=10000` |
@@ -37,6 +47,6 @@ Free Web Service 会在 15 分钟无流量后休眠，冷启动约需一分钟�
 本地上传文件在重启/重新部署/休眠后丢失，待处理的解析可能需要重新上传；已存入 PostgreSQL 的联系人、草稿和解析结果仍受数据库生命周期约束。
 Free PostgreSQL 30 天后到期，不能用于长期保存真实客户数据。模型与搜索提供商仍按各自用量计费。
 
-公开仓库直接连接不会授予 Render 新的 GitHub 账号权限；普通 Public Git Repository 部署不保证自动随 push 更新，需要从 Render 手动部署最新提交。
+若在其他账号使用 Public Git Repository 方式连接，普通公开仓库部署不保证自动随 push 更新，需要从 Render 手动部署最新提交。当前实例使用已有 GitHub 连接。
 
 参考：[Render 免费实例](https://render.com/docs/free)、[Docker 部署](https://render.com/docs/docker)、[默认环境变量](https://render.com/docs/environment-variables)。
