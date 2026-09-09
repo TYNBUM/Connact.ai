@@ -2,6 +2,15 @@
 
 This record distinguishes actual runtime results, contract testing, and unverified sections. Older dated results are retained as history; the latest section supersedes their provider and deployment status.
 
+## 2026-09-09: Recover the login page after a Render cold start
+
+- Captured live frontend `/api/auth/session` and `/api/health` responses with HTTP 502 and an HTML body while direct backend requests timed out. Render logs recorded backend startup at 10:00 GMT+8. The previous client attempted to parse this HTML as JSON, surfacing a browser parser error on the login card.
+- After startup, frontend and backend session/health endpoints returned HTTP 200 JSON, including `database: postgresql`. A fresh browser displayed the login form, and an existing signed-in browser opened its workspace. Unauthenticated `/api/config` remained HTTP 401; an unapproved Origin remained HTTP 403.
+- The client now handles non-JSON responses without exposing browser parser errors. Session reads retry transient failures up to five times after the initial request, with a 15-second request timeout and about 2.5 minutes total maximum wait. Retries can be restarted manually and are cancelled on unmount. Login, registration and other writes are never automatically retried.
+- Production Next.js build and TypeScript passed. Both isolated real-backend browser flows passed: invitation registration/login/logout with workspace isolation, and open registration with administrator access controls and original-file inspection. All test accounts and files were confined to disposable local databases.
+- Nine controlled failure/recovery scenarios passed against the production build in both Chromium and mobile WebKit (18 checks): HTML 502, HTML 200, invalid session JSON, network failure, stalled-request timeout, retry exhaustion/manual recovery, cancellation of a pending retry, a single failed login POST with its server detail preserved, and no recursive session reads on HTTP 401. Mobile recovery screenshots were visually reviewed. These controlled responses are regression evidence, separate from the live endpoint checks above.
+- The free Render services still sleep when idle. This repair handles recovery in the client; it does not establish an always-on hosting guarantee or verify live AI/search providers.
+
 ## 2026-09-08: Persistent people retrieval, Sequence-style writing and invitation trial
 
 - Final full backend suite: **64 passed on a temporary independent PostgreSQL database**. SQLite suite: 63 passed and one PostgreSQL-only concurrency test skipped.

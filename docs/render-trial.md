@@ -46,6 +46,14 @@ Free Web Service 会在 15 分钟无流量后休眠，冷启动约需一分钟�
 新上传原件与联系人、草稿、解析结果一起存入 PostgreSQL，应用重启不会丢失数据库内的文件。旧版本已随临时磁盘丢失的原件无法恢复，后台会显示不可下载。所有数据和文件仍受免费数据库容量及到期时间约束。
 Free PostgreSQL 30 天后到期，不能用于长期保存真实客户数据。模型与搜索提供商仍按各自用量计费。
 
+## 冷启动时页面无法加载
+
+若首页能显示，但登录卡片出现 `The string did not match the expected pattern.`（Safari）或 `Unexpected token '<' ... is not valid JSON`（Chrome），先检查 `/api/auth/session` 和 `/api/health` 的 HTTP 状态与 Content-Type。这类解析错误可能来自 Render 在后端启动期间返回的 HTML 错误页，不能直接判定为用户输入或网址格式错误。
+
+2026-09-09 实测前端代理返回 HTTP 502、`text/html`，后端直连等待超时；Render 后端日志随后记录启动完成。恢复后，前端代理和后端直连的会话与健康检查均返回 HTTP 200 JSON，健康检查确认 PostgreSQL 正常，已有登录会话可重新进入工作区。
+
+排查顺序：确认前端页面与静态资源可达 → 检查前端代理的会话和健康接口 → 检查后端 `/api/health` → 查看 Render 启动日志。不要只重启前端或清除用户账户数据。免费实例仍有休眠与冷启动延迟；客户端恢复逻辑不能保证服务器始终在线。
+
 若在其他账号使用 Public Git Repository 方式连接，普通公开仓库部署不保证自动随 push 更新，需要从 Render 手动部署最新提交。当前实例使用已有 GitHub 连接。
 
 参考：[Render 免费实例](https://render.com/docs/free)、[Docker 部署](https://render.com/docs/docker)、[默认环境变量](https://render.com/docs/environment-variables)。

@@ -1,6 +1,12 @@
 "use client";
-import { useEffect, useState, type FormEvent } from "react";
-import { api, post, errorText } from "@/lib/api";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import { api, post, errorText, ApiError } from "@/lib/api";
 
 type Session = {
   mode: "local" | "invite" | "open";
@@ -8,6 +14,22 @@ type Session = {
   email: string | null;
   workspace_id: string | null;
 };
+
+// Six reads, at most 15 seconds each, and 60 seconds of backoff: about 2.5 minutes.
+const sessionRetryDelays = [5000, 10000, 15000, 15000, 15000];
+
+function waitForRetry(delay: number, signal: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, delay);
+    signal.addEventListener("abort", finish, { once: true });
+    if (signal.aborted) finish();
+  });
+}
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -17,18 +39,74 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [invitation, setInvitation] = useState("");
-  const load = () =>
-    api<Session>("/auth/session")
-      .then(setSession)
-      .catch((e) => setError(errorText(e)));
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const activeLoad = useRef<AbortController | null>(null);
+  const load = useCallback(async () => {
+    activeLoad.current?.abort();
+    const controller = new AbortController();
+    activeLoad.current = controller;
+    setError("");
+    setRetryAttempt(0);
+    for (let attempt = 0; attempt <= sessionRetryDelays.length; attempt++) {
+      if (controller.signal.aborted) return;
+      const request = new AbortController();
+      const abort = () => request.abort();
+      controller.signal.addEventListener("abort", abort, { once: true });
+      const timeout = setTimeout(abort, 15000);
+      let failure: unknown;
+      try {
+        const next = await api<Session>("/auth/session", {
+          signal: request.signal,
+        });
+        if (controller.signal.aborted) return;
+        if (
+          !next ||
+          !["local", "invite", "open"].includes(next.mode) ||
+          typeof next.authenticated !== "boolean"
+        )
+          throw new ApiError(
+            "The service returned an invalid response. Please retry. / 服务响应异常，请重试。",
+            true,
+          );
+        setSession(next);
+        setError("");
+        setRetryAttempt(0);
+        return;
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        failure = request.signal.aborted
+          ? new ApiError(
+              "The service is taking too long to respond. Please retry. / 服务响应超时，请重试。",
+              true,
+            )
+          : error;
+      } finally {
+        clearTimeout(timeout);
+        controller.signal.removeEventListener("abort", abort);
+      }
+      if (
+        !(failure instanceof ApiError && failure.retryable) ||
+        attempt === sessionRetryDelays.length
+      ) {
+        setError(errorText(failure));
+        setRetryAttempt(0);
+        return;
+      }
+      setRetryAttempt(attempt + 1);
+      await waitForRetry(sessionRetryDelays[attempt], controller.signal);
+    }
+  }, []);
   useEffect(() => {
     void load();
     const expired = () => {
       void load();
     };
     window.addEventListener("connact-session-expired", expired);
-    return () => window.removeEventListener("connact-session-expired", expired);
-  }, []);
+    return () => {
+      activeLoad.current?.abort();
+      window.removeEventListener("connact-session-expired", expired);
+    };
+  }, [load]);
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -55,16 +133,20 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         <img src="/connact-logo-dark.svg" alt="Connact.ai" width={190} />
         {!session ? (
           <>
-            <p>{error || "Loading workspace… / 正在加载工作区…"}</p>
-            {error && (
+            <p role={error ? "alert" : "status"}>
+              {error ||
+                (retryAttempt
+                  ? `The service is starting or reconnecting… (${retryAttempt}/${sessionRetryDelays.length}) / 服务正在启动或正在重新连接… (${retryAttempt}/${sessionRetryDelays.length})`
+                  : "Loading workspace… / 正在加载工作区…")}
+            </p>
+            {(error || retryAttempt > 0) && (
               <button
                 className="button"
                 onClick={() => {
-                  setError("");
                   void load();
                 }}
               >
-                Retry / 重试
+                {error ? "Retry / 重试" : "Retry now / 立即重试"}
               </button>
             )}
           </>
