@@ -46,11 +46,22 @@ On the **Render backend** set `AUTH_MODE=open`, `AUTH_PROVIDER=google`, `PUBLIC_
 
 Configure the production app's real homepage, support contact, privacy policy and owned domains, publish it in **Audience**, and follow Google's brand verification requirements. Production clients should not include localhost redirect URIs. Basic sign-in scopes do not require sensitive-scope review; brand requirements are separate. See [Google's production guidance](https://developers.google.com/identity/verification/authentication-policy-compliance).
 
+The public homepage is `/about` and the privacy policy is `/privacy`; both are readable without signing in. Set `PUBLIC_SUPPORT_EMAIL` on the **Render frontend** to the confirmed public support address. Website verification files belong in `frontend/public/` and must remain available after verification.
+
+### Preserve the existing administrator
+
+1. Deploy migration `e318ca421010` and configure the production OAuth client while keeping `AUTH_PROVIDER=password`.
+2. Sign in as the existing `admin`, open `/admin`, and enter the intended Google email under **Administrator Google sign-in**. Click **Link Google account** and complete Google's identity check.
+3. Confirm that the server reports `google_linked: true` and that the original administrator workspace remains accessible. The reserved username, user ID, data and role are preserved; no new administrator is created.
+4. Change the backend to `AUTH_PROVIDER=google`, redeploy, then sign out and sign back in through Google. Verify the same administrator workspace and permissions.
+
+The binding request is available only to the authenticated reserved administrator. It binds one-use OAuth state to the chosen email and the initiating login session. The callback checks that this session is still valid, verifies the Google identity, rejects existing account/identity conflicts, and replaces the administrator's old sessions. It never promotes an ordinary Google user by matching an environment email.
+
 ## Existing accounts and implementation boundaries
 
 - Google identity uses its signed, stable `sub`, not the email as an identity key. Subsequent email changes do not move the workspace. Every new user gets a separate server-assigned workspace.
 - An existing account with a Google-hosted verified email can be linked to Google while retaining its saved data. First-time linking revokes old account sessions before issuing the verified user's new session, since legacy password registration did not verify ownership of that email. For third-party email domains where Google does not assert current ownership, linking also requires an existing authenticated session; otherwise the UI directs the user to account support. No account is silently merged with a different Google identity.
-- The reserved legacy `admin` username is not a Google email and is not automatically migrated or assigned to another Google user. Its role and saved data remain unchanged. Choose and explicitly authorize an administrator migration before disabling password access if that account must keep signing in. This implementation does not grant an administrator role by environment email or ordinary registration.
+- The reserved legacy `admin` username is linked only through the explicit administrator flow above; it is never automatically migrated or assigned to another Google user. Ordinary registration does not grant an administrator role.
 - Invite mode checks an invitation only when creating a new account, binds any email restriction to Google's verified email, and consumes a place in the same transaction as account creation.
 - The callback verifies one-use browser-bound state, PKCE, nonce, signature, issuer, audience, and expiration. Google access/ID tokens are never persisted. Local session tokens remain opaque and revocable; no Google account password is handled by Connact.ai.
 - The Next.js proxy forwards redirects and each `Set-Cookie` header to the browser without following Google's authorization URL on the server. OAuth callback responses suppress referrers.
@@ -64,7 +75,7 @@ Configure the production app's real homepage, support contact, privacy policy an
 | `redirect_uri_mismatch` | The registered callback must equal `PUBLIC_ORIGIN + /api/auth/google/callback`, including protocol, host, port and path. |
 | Login request expired or invalid | Start again using the same browser and configured frontend origin; state expires after ten minutes and is one-use. |
 | Existing third-party email needs linking | Establish the existing account session before migrating the provider, then link Google, or arrange a verified account migration with the administrator. |
-| The original username `admin` cannot use Google | It needs an explicitly authorized administrator migration; new Google users never inherit that role. |
+| The original username `admin` cannot use Google | Complete the explicit binding from `/admin` while password login is still enabled; new Google users never inherit that role. |
 
 Official protocol reference: [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect).
 

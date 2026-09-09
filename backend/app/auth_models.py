@@ -49,4 +49,7 @@ class GoogleOAuthState(Identity, Base):
     next_path: Mapped[str] = mapped_column(String(2000))
     invitation_hash: Mapped[str | None] = mapped_column(String(64))
     linking_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    purpose: Mapped[str] = mapped_column(String(30), default="signin", server_default="signin")
+    linking_email_hash: Mapped[str | None] = mapped_column(String(64))
+    linking_session_hash: Mapped[str | None] = mapped_column(String(64))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

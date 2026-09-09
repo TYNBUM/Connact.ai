@@ -15,6 +15,7 @@ import {
 import { api, errorText } from "@/lib/api";
 import { useApp } from "@/lib/context";
 import { Heading, Badge } from "./ui";
+import AdminGoogleLink from "./admin-google-link";
 
 type Account = {
   id: string;
@@ -299,6 +300,7 @@ export default function Admin() {
           {t("Refresh", "刷新")}
         </button>
       </Heading>
+      <AdminGoogleLink revision={revision} />
       {overview && (
         <div className="admin-stats">
           {[

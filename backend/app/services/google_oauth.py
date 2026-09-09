@@ -88,7 +88,7 @@ def clear_state_cookie(response):
     )
 
 
-def begin(db, next_path, invitation="", linking_user_id=None):
+def begin(db, next_path, invitation="", linking_user_id=None, *, admin_email=None, admin_session_hash=None):
     state, browser_token, nonce = (secrets.token_urlsafe(32) for _ in range(3))
     verifier = secrets.token_urlsafe(48)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
@@ -98,7 +98,10 @@ def begin(db, next_path, invitation="", linking_user_id=None):
         state_hash=digest(state), browser_hash=digest(browser_token), nonce_hash=digest(nonce),
         code_verifier=verifier, next_path=safe_next(next_path),
         invitation_hash=digest(invitation) if invitation else None,
-        linking_user_id=linking_user_id, expires_at=clock + timedelta(seconds=STATE_SECONDS),
+        linking_user_id=linking_user_id, purpose="admin_link" if admin_email else "signin",
+        linking_email_hash=digest(admin_email) if admin_email else None,
+        linking_session_hash=admin_session_hash,
+        expires_at=clock + timedelta(seconds=STATE_SECONDS),
     ))
     db.commit()
     return GOOGLE_AUTHORIZATION_URL + "?" + urlencode({
@@ -189,6 +192,49 @@ def authoritative_email(claims):
     return domain in ("gmail.com", "googlemail.com") or (
         isinstance(claims.get("hd"), str) and claims["hd"].lower() == domain
     )
+
+
+def resolve_admin_link(db, claims, state, current_session_token=""):
+    """Link only an explicitly authenticated reserved admin, never promote a user.
+
+    The Strict login cookie may be absent on Google's cross-site callback. Its
+    initiating session remains bound into the one-use, browser-bound OAuth state
+    and must still be live in the database when the verified callback arrives.
+    """
+    if state.purpose != "admin_link" or not state.linking_user_id or not state.linking_session_hash:
+        raise GoogleOAuthError("admin_link_session")
+    # Serialize attempts for one administrator before taking any session lock;
+    # otherwise different initiating sessions can deadlock during revocation.
+    user = db.scalar(select(User).where(User.id == state.linking_user_id).with_for_update())
+    session = db.scalar(select(LoginSession).where(
+        LoginSession.token_hash == state.linking_session_hash,
+        LoginSession.user_id == state.linking_user_id,
+    ).with_for_update())
+    if (
+        not session or utc(session.expires_at) <= datetime.now(timezone.utc)
+        or not user or not user.is_admin or user.email != "admin"
+        or (current_session_token and not hmac.compare_digest(digest(current_session_token), state.linking_session_hash))
+    ):
+        raise GoogleOAuthError("admin_link_session")
+    email = claims["email"].strip().lower()
+    if (
+        not state.linking_email_hash or not hmac.compare_digest(digest(email), state.linking_email_hash)
+        or not authoritative_email(claims)
+    ):
+        raise GoogleOAuthError("admin_link_email")
+    # Existing accounts and identities must never be moved or merged implicitly.
+    if (
+        db.scalar(select(GoogleIdentity).where(GoogleIdentity.subject == claims["sub"]))
+        or db.scalar(select(GoogleIdentity).where(GoogleIdentity.user_id == user.id))
+        or db.scalar(select(User).where(User.email == email, User.id != user.id))
+    ):
+        raise GoogleOAuthError("identity_conflict")
+    db.add(GoogleIdentity(user_id=user.id, subject=claims["sub"]))
+    db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
+    # Keep the reserved username, workspace, role and password hash intact. This
+    # preserves data and rollback, and bootstrap_admin cannot create a duplicate.
+    db.flush()
+    return user
 
 
 def resolve_user(db, claims, state):

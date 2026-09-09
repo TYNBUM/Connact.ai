@@ -72,7 +72,11 @@ https://connact-ai.onrender.com/api/auth/google/callback
 
 在 **Render 后端服务**中设置 OAuth 凭据、`AUTH_PROVIDER=google`、`AUTH_MODE=open`、`PUBLIC_ORIGIN=https://connact-ai.onrender.com`，前端的 `PUBLIC_ORIGIN` 也保持一致。不要把 secret 配置到前端服务。生产项目按 Google 的 Audience 发布和品牌验证要求完成真实首页、隐私政策等配置，不加入 localhost 回调。
 
-先部署代码和数据库迁移，再在客户端配置就绪后切换登录方式。已有普通账号会按经过验证的 Google 身份关联原工作区；部分使用第三方邮箱的旧账号需要先建立旧账号会话再绑定。原保留用户名 `admin` 不是 Google 邮箱，不能自动迁移或把管理权限交给一个新 Google 用户；正式切换前需要明确管理员迁移安排。
+公开介绍页位于 `/about`，隐私政策位于 `/privacy`，均无需登录。在 Render **前端**设置 `PUBLIC_SUPPORT_EMAIL` 为确认公开的支持邮箱。网站验证文件放在 `frontend/public/` 中，验证后也应保留。
+
+保留管理员的切换顺序：先部署 `e318ca421010` 迁移并配置生产 OAuth 凭据，暂时保留 `AUTH_PROVIDER=password`。用原 `admin` 登录，打开 `/admin`，在“管理员 Google 登录”中填写确认的 Google 邮箱并完成真实 Google 验证。页面及服务端确认已绑定后，再改为 `AUTH_PROVIDER=google` 并部署；退出后重新使用 Google 登录，核对原工作区和管理员权限。
+
+绑定会保留原管理员的用户名 `admin`、用户 ID、工作区、数据和角色，不创建第二个管理员。回调同时核验 Google 身份、选定邮箱以及发起时管理员会话仍然有效，拒绝与已有账号或身份冲突的绑定，并撤销旧管理员会话。普通 Google 注册不会自动取得管理权限。已有普通账号会按经过验证的 Google 身份关联原工作区；部分使用第三方邮箱的旧账号需要先建立旧账号会话再绑定。
 
 2026-09-09 已将 `Connact.ai Local Web` 凭据写入本地私有 `.env`，启用 Google 登录，重建前后端 Docker 容器，并把数据库迁移到 `d247ab731009`。Chrome 已完成真实 Google 登录并进入独立工作区。原 `local-personal` 工作区及其中的一份草稿保留；新 Google 账号使用独立工作区，没有管理员权限。这次完成的是本地启用，尚未把 Google 登录配置部署到 Render。
 

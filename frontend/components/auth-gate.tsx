@@ -7,6 +7,7 @@ import {
   type FormEvent,
 } from "react";
 import { api, post, errorText, ApiError } from "@/lib/api";
+import { googleAuthorizationUrl, googleErrorText } from "@/lib/google-auth";
 
 type Session = {
   mode: "local" | "invite" | "open";
@@ -15,29 +16,6 @@ type Session = {
   workspace_id: string | null;
   provider?: "password" | "google";
   google_configured?: boolean;
-};
-
-const googleErrors: Record<string, string> = {
-  google_cancelled:
-    "Google sign-in was canceled. Please try again. / 已取消 Google 登录，请重试。",
-  google_invalid_state:
-    "This sign-in link has expired or belongs to another browser. Please try again. / 登录请求已失效，请重新登录。",
-  google_expired:
-    "This sign-in link has expired. Please try again. / 登录请求已过期，请重新登录。",
-  google_invitation_required:
-    "A valid invitation for this Google email is required. / 此 Google 邮箱需要有效的邀请码。",
-  google_invitation_invalid:
-    "This invitation is expired, fully used, or belongs to another email. / 邀请码已失效、名额已用完，或与 Google 邮箱不匹配。",
-  google_invalid_identity:
-    "Google identity could not be verified. Please sign in again. / 无法验证 Google 身份，请重新登录。",
-  google_unavailable:
-    "Google sign-in is temporarily unavailable. Please try again. / Google 登录暂时不可用，请重试。",
-  google_identity_conflict:
-    "This account is linked to a different Google identity. Please contact the administrator. / 此账号已绑定其他 Google 身份，请联系管理员。",
-  google_link_required:
-    "Sign in to your existing account before linking this Google account. Contact the administrator for help. / 请先登录原账号再绑定此 Google 账号；如无法登录，请联系管理员。",
-  google_not_configured:
-    "Google sign-in is awaiting server configuration. / Google 登录尚待服务端配置。",
 };
 
 function GoogleMark() {
@@ -146,13 +124,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }, []);
   useEffect(() => {
+    // The admin page handles its own callbacks; invalid state can return to /.
+    if (!session) return;
     const url = new URL(window.location.href);
+    if (session.authenticated && url.pathname === "/admin") return;
     const code = url.searchParams.get("error");
     if (code?.startsWith("google_")) {
-      setOauthError(
-        googleErrors[code] ||
-          "Google sign-in could not be completed. Please try again. / Google 登录未完成，请重试。",
-      );
+      setOauthError(googleErrorText(code));
       url.searchParams.delete("error");
       window.history.replaceState(
         window.history.state,
@@ -160,6 +138,8 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         url.pathname + url.search + url.hash,
       );
     }
+  }, [session]);
+  useEffect(() => {
     void load();
     const expired = () => {
       void load();
@@ -186,10 +166,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           invitation: session?.mode === "invite" ? invitation : "",
         },
       );
-      const destination = new URL(result.authorization_url);
-      if (destination.origin !== "https://accounts.google.com")
-        throw new Error("The service returned an invalid Google sign-in URL.");
-      window.location.assign(destination.href);
+      window.location.assign(googleAuthorizationUrl(result.authorization_url));
     } catch (failure) {
       setError(errorText(failure));
       setBusy(false);
@@ -199,6 +176,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     e.preventDefault();
     setBusy(true);
     setError("");
+    setOauthError("");
     try {
       await post(joining ? "/auth/join" : "/auth/login", {
         email,
@@ -214,7 +192,23 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       setBusy(false);
     }
   }
-  if (session?.authenticated) return <>{children}</>;
+  if (session?.authenticated)
+    return (
+      <>
+        {children}
+        {oauthError && (
+          <div className="toast" role="alert">
+            {oauthError}
+            <button
+              aria-label="Dismiss / 关闭"
+              onClick={() => setOauthError("")}
+            >
+              ×
+            </button>
+          </div>
+        )}
+      </>
+    );
   return (
     <main className="auth-page">
       <section className="auth-card">
@@ -350,9 +344,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                   </small>
                 </>
               )}
-              {error && (
+              {(error || oauthError) && (
                 <p className="error-text" role="alert">
-                  {error}
+                  {error || oauthError}
                 </p>
               )}
               <button className="button primary" disabled={busy}>
@@ -383,6 +377,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
             </small>
           </>
         )}
+        <small>
+          <a href="/about">About / 关于</a>
+          {" · "}
+          <a href="/privacy">Privacy / 隐私政策</a>
+        </small>
       </section>
     </main>
   );

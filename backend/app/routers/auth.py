@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from ..config import settings
 from ..db import Session
 from ..models import Workspace
-from ..auth_models import User, LoginSession, Invitation
+from ..auth_models import User, LoginSession, Invitation, GoogleIdentity
 from ..services import google_oauth
 
 router = APIRouter(prefix="/auth")
@@ -96,6 +96,21 @@ class GoogleStart(BaseModel):
     invitation: str = Field(default="", max_length=200)
 
 
+class GoogleAdminLink(BaseModel):
+    email: str = Field(min_length=3, max_length=250)
+
+    @field_validator("email")
+    @classmethod
+    def normalized(cls, value):
+        value = value.strip().lower()
+        if value.count("@") != 1 or any(c.isspace() or ord(c) < 32 for c in value):
+            raise ValueError("Enter the Google account email to link.")
+        local, domain = value.split("@")
+        if not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
+            raise ValueError("Enter the Google account email to link.")
+        return value
+
+
 def throttle(email, identity_limit=10):
     # Single-process invitation pilot. A shared limiter is required for replicas.
     with _lock:
@@ -124,12 +139,13 @@ def login_cookie(db, user, response):
 def session(request: Request):
     provider = {"provider": settings.auth_provider, "google_configured": google_oauth.configured()}
     if settings.auth_mode == "local":
-        return {**provider, "mode": "local", "authenticated": True, "email": None, "workspace_id": settings.workspace_id, "is_admin": False}
+        return {**provider, "mode": "local", "authenticated": True, "email": None, "workspace_id": settings.workspace_id, "is_admin": False, "google_linked": False}
     with Session() as db:
         user = session_user(db, request)
         return {**provider, "mode": settings.auth_mode, "authenticated": bool(user),
                 "email": user.email if user else None, "workspace_id": user.workspace_id if user else None,
-                "is_admin": bool(user and user.is_admin)}
+                "is_admin": bool(user and user.is_admin),
+                "google_linked": bool(user and db.scalar(select(GoogleIdentity.id).where(GoogleIdentity.user_id == user.id)))}
 
 
 @router.post("/login")
@@ -216,8 +232,34 @@ def google_start_with_invitation(body: GoogleStart, request: Request, response: 
     return {"authorization_url": url}
 
 
-def google_failure(reason):
-    response = RedirectResponse("/?error=google_" + reason, status_code=302)
+@router.post("/google/link-admin")
+def google_link_admin(body: GoogleAdminLink, request: Request, response: Response):
+    if settings.auth_mode == "local":
+        raise HTTPException(409, "Administrator linking requires a signed-in account.")
+    with Session() as db:
+        user = session_user(db, request)
+        if not user:
+            raise HTTPException(401, "Sign in to the existing administrator account first.")
+        if not user.is_admin or user.email != "admin":
+            raise HTTPException(403, "Only the existing reserved administrator can link this account.")
+        if not google_oauth.configured():
+            raise HTTPException(503, "Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
+        if db.scalar(select(GoogleIdentity.id).where(GoogleIdentity.user_id == user.id)):
+            raise HTTPException(409, "This administrator already has a linked Google identity.")
+        if db.scalar(select(User.id).where(User.email == body.email, User.id != user.id)):
+            raise HTTPException(409, "This email already belongs to another account. Accounts cannot be merged here.")
+        throttle("google-admin-link", identity_limit=10)
+        url, browser_token = google_oauth.begin(
+            db, "/admin?google_link=success", linking_user_id=user.id,
+            admin_email=body.email, admin_session_hash=digest(request.cookies[COOKIE]),
+        )
+    google_oauth.set_state_cookie(response, browser_token)
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return {"authorization_url": url}
+
+
+def google_failure(reason, admin_link=False):
+    response = RedirectResponse(("/admin" if admin_link else "/") + "?error=google_" + reason, status_code=302)
     google_oauth.clear_state_cookie(response)
     response.headers["Referrer-Policy"] = "no-referrer"
     return response
@@ -225,15 +267,20 @@ def google_failure(reason):
 
 @router.get("/google/callback")
 def google_callback(request: Request, state: str = "", code: str = "", error: str = ""):
-    if settings.auth_provider != "google" or settings.auth_mode == "local" or not google_oauth.configured():
+    if settings.auth_mode == "local" or not google_oauth.configured():
         return google_failure("not_configured")
+    admin_link = False
     try:
         attempt = google_oauth.consume_state(state, request.cookies.get(google_oauth.OAUTH_COOKIE, ""))
+        admin_link = attempt.purpose == "admin_link"
+        if settings.auth_provider != "google" and not admin_link:
+            raise google_oauth.GoogleOAuthError("not_configured")
         if error:
             raise google_oauth.GoogleOAuthError("cancelled")
         claims = google_oauth.exchange_code(code, attempt)
         with Session() as db:
-            user = google_oauth.resolve_user(db, claims, attempt)
+            user = (google_oauth.resolve_admin_link(db, claims, attempt, request.cookies.get(COOKIE, ""))
+                    if admin_link else google_oauth.resolve_user(db, claims, attempt))
             response = RedirectResponse(google_oauth.safe_next(attempt.next_path), status_code=302)
             login_cookie(db, user, response)
             db.commit()
@@ -241,10 +288,10 @@ def google_callback(request: Request, state: str = "", code: str = "", error: st
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
     except google_oauth.GoogleOAuthError as exc:
-        return google_failure(exc.reason)
+        return google_failure(exc.reason, admin_link)
     except IntegrityError:
         # Concurrent registration/linking must not move identities between users.
-        return google_failure("identity_conflict")
+        return google_failure("identity_conflict", admin_link)
 
 
 @router.post("/logout")
