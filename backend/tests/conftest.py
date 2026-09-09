@@ -15,6 +15,9 @@ for key in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_A
     os.environ[key] = ""
 os.environ["PUBLIC_SEARCH_MODE"] = "mock"
 os.environ["AUTH_MODE"] = "local"
+os.environ["AUTH_PROVIDER"] = "password"
+os.environ["GOOGLE_CLIENT_ID"] = ""
+os.environ["GOOGLE_CLIENT_SECRET"] = ""
 os.environ["PUBLIC_ORIGIN"] = "http://127.0.0.1:3100"
 # Contract tests must never pick up real credentials from the local .env.
 for key in ("SERPAPI_API_KEY", "APOLLO_API_KEY", "AI_API_KEY", "APIFY_API_KEY", "APIFY_API_TOKEN"):

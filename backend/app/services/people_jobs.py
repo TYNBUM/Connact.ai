@@ -23,6 +23,7 @@ from ..models import (
 )
 from ..providers import people_search, people_enrichment
 from ..providers.apify import ApifyProfileProvider
+from ..providers.base import LocalProviderRateLimit
 from ..providers.linkedin import linkedin_profile
 from .contacts import row, contact_json, upsert_search, lock_contact
 
@@ -30,6 +31,9 @@ ACTIVE = ("queued", "running", "waiting")
 _stop = Event()
 _thread = None
 _enqueue_lock = Lock()
+_claim_lock = Lock()
+# At most two automatic profile runs are in flight on the single API process.
+PROFILE_CONCURRENCY = 2
 _log = logging.getLogger(__name__)
 
 
@@ -39,16 +43,92 @@ def fresh(date, hours):
     )
 
 
+def search_profile_states(repo, job, contacts=None):
+    """Read current readiness; a saved search is never proof of an intact profile."""
+    states = {}
+    for contact_id in job.result.get("contact_ids", []):
+        stored = job.result.get("profiles", {}).get(contact_id)
+        if stored is None:
+            contact = (contacts or {}).get(contact_id) or contact_json(
+                repo, repo.get(Contact, contact_id)
+            )
+            professional = contact["professional"]
+            if contact["provider"] == "mock":
+                states[contact_id] = {"status": "skipped", "error": ""}
+            elif professional.get("retrieved_at") and linkedin_profile(
+                professional.get("source_url")
+            ) == linkedin_profile(contact["profile_url"]):
+                states[contact_id] = {
+                    "status": "succeeded",
+                    "error": "",
+                    "cached": True,
+                }
+            else:
+                states[contact_id] = {
+                    "status": "failed",
+                    "invalidated": True,
+                    "error": "This saved search predates automatic profile preparation. Search again to prepare details.",
+                }
+            continue
+        state = dict(stored)
+        state.pop("invalidated", None)
+        if state.get("job_id"):
+            child = repo.get(PeopleJob, state["job_id"])
+            repo.session.refresh(child)
+            state.update(status=child.status, error=child.error)
+            if child.result.get("cache_invalidated"):
+                state.update(
+                    status="failed",
+                    invalidated=True,
+                    error="Contact was edited. Search again to prepare its current profile.",
+                )
+            elif child.status == "succeeded":
+                contact = (contacts or {}).get(contact_id) or contact_json(
+                    repo, repo.get(Contact, contact_id)
+                )
+                professional = contact["professional"]
+                if not professional.get("retrieved_at") or linkedin_profile(
+                    professional.get("source_url")
+                ) != linkedin_profile(contact["profile_url"]):
+                    state.update(
+                        status="failed",
+                        invalidated=True,
+                        error="The saved professional profile is no longer available for this contact. Search again to prepare details.",
+                    )
+        states[contact_id] = state
+    return states
+
+
+def profile_progress(states):
+    return {
+        "total": len(states),
+        "ready": sum(s["status"] == "succeeded" for s in states.values()),
+        "failed": sum(s["status"] == "failed" for s in states.values()),
+        "skipped": sum(s["status"] == "skipped" for s in states.values()),
+        "pending": sum(s["status"] in ACTIVE for s in states.values()),
+    }
+
+
 def serialize(repo, job, include_result=True):
     data = row(job)
     data.pop("fingerprint", None)
     # Public response contains run ID for support, never provider credentials.
     if include_result and job.status == "succeeded":
         if job.kind == "search":
+            contacts = {
+                id: contact_json(repo, repo.get(Contact, id))
+                for id in job.result.get("contact_ids", [])
+            }
+            states = search_profile_states(repo, job, contacts)
             data["result"] = {
                 **job.result,
+                "profiles": states,
+                "profile_progress": profile_progress(states),
                 "items": [
-                    contact_json(repo, repo.get(Contact, id))
+                    {
+                        **contacts[id],
+                        "profile_prefetch": states.get(id),
+                    }
                     for id in job.result.get("contact_ids", [])
                 ],
             }
@@ -60,7 +140,7 @@ def serialize(repo, job, include_result=True):
     return data
 
 
-def enqueue(repo, kind, payload, contact=None, force=False):
+def enqueue(repo, kind, payload, contact=None, force=False, reuse_failed=False):
     if kind not in ("search", "profile", "email", "email_apify"):
         raise HTTPException(422, "Unknown people job type.")
     if contact:
@@ -91,7 +171,7 @@ def enqueue(repo, kind, payload, contact=None, force=False):
         payload["contact"].pop("updated_at", None)
     payload = {**payload, "mode": settings.people_mode}
     identity = (
-        payload
+        ({**payload, "pipeline_version": 2} if kind == "search" else payload)
         if not contact
         else {
             "mode": settings.people_mode,
@@ -105,7 +185,10 @@ def enqueue(repo, kind, payload, contact=None, force=False):
         json.dumps({"kind": kind, "input": identity}, sort_keys=True).encode()
     ).hexdigest()
     with _enqueue_lock:
-        jobs = repo.all(PeopleJob, PeopleJob.fingerprint == fingerprint)
+        jobs = sorted(
+            repo.all(PeopleJob, PeopleJob.fingerprint == fingerprint),
+            key=lambda j: j.created_at,
+        )
         active = next((j for j in reversed(jobs) if j.status in ACTIVE), None)
         if active:
             return active, True
@@ -118,11 +201,49 @@ def enqueue(repo, kind, payload, contact=None, force=False):
                 and fresh(
                     j.updated_at, 1 if kind == "search" else settings.people_cache_hours
                 )
+                and (
+                    kind != "search"
+                    or not any(
+                        s.get("invalidated")
+                        for s in search_profile_states(repo, j).values()
+                    )
+                )
+                and (
+                    kind != "profile"
+                    or any(
+                        p.data.get("retrieved_at")
+                        and linkedin_profile(p.data.get("source_url"))
+                        == linkedin_profile(contact.profile_url)
+                        for p in repo.all(
+                            ContactDomainProfile,
+                            ContactDomainProfile.contact_id == contact.id,
+                            ContactDomainProfile.domain == "professional",
+                        )
+                    )
+                )
             ),
             None,
         )
         if cached and not force:
             return cached, True
+        # Page preparation must not resubmit failed paid work on every search.
+        # An uncertain submission stays blocked until explicitly reviewed.
+        if reuse_failed and not force:
+            failed = next(
+                (
+                    j
+                    for j in reversed(jobs)
+                    if j.status == "failed"
+                    and not j.result.get("cache_invalidated")
+                    and (
+                        not j.retryable
+                        or fresh(j.updated_at, settings.people_cache_hours)
+                    )
+                ),
+                None,
+            )
+            if failed:
+                return failed, True
         job = repo.add(
             PeopleJob,
             kind=kind,
@@ -133,6 +254,43 @@ def enqueue(repo, kind, payload, contact=None, force=False):
         # Commit before worker receives it, including any pending contact changes.
         repo.session.commit()
         return job, False
+
+
+def prepare_search_profiles(repo, job):
+    """Resume page preparation without repeating discovery or profile submissions."""
+    states = dict(job.result.get("profiles", {}))
+    for contact_id in job.result["contact_ids"]:
+        if contact_id in states:
+            continue
+        contact = repo.get(Contact, contact_id)
+        if settings.people_mode == "mock" or contact.provider == "mock":
+            states[contact_id] = {"status": "skipped", "error": ""}
+        else:
+            try:
+                child, cached = enqueue(
+                    repo, "profile", {"automatic": True}, contact, reuse_failed=True
+                )
+                states[contact_id] = {
+                    "job_id": child.id,
+                    "status": child.status,
+                    "cached": cached,
+                    "error": child.error,
+                }
+            except HTTPException as exc:
+                states[contact_id] = {"status": "failed", "error": str(exc.detail)}
+        # A restart between enqueue and this commit finds the same fingerprint.
+        job.result = {**job.result, "profiles": states}
+        repo.session.commit()
+    states = search_profile_states(repo, job)
+    progress = profile_progress(states)
+    job.result = {
+        **job.result,
+        "profiles": states,
+        "profile_progress": progress,
+        "phase": "profiles" if progress["pending"] else "complete",
+    }
+    job.status = "waiting" if progress["pending"] else "succeeded"
+    job.next_poll_at = now() + timedelta(seconds=2) if progress["pending"] else None
 
 
 def apply_email(repo, contact, data, provider=None):
@@ -257,16 +415,37 @@ def process_job(job_id):
         if not job or job.status not in ("queued", "waiting"):
             return
         old_status = job.status
-        claimed = session.execute(
-            update(PeopleJob)
-            .where(PeopleJob.id == job_id, PeopleJob.status == old_status)
-            .values(status="running")
-        )
-        if not claimed.rowcount:
-            session.rollback()
-            return
-        job.attempts += 1
-        session.commit()
+        with _claim_lock:
+            if (
+                job.kind == "profile"
+                and job.input.get("automatic")
+                and not job.upstream.get("run_id")
+            ):
+                in_flight = session.scalars(
+                    select(PeopleJob).where(
+                        PeopleJob.kind.in_(("profile", "email_apify")),
+                        PeopleJob.status.in_(("running", "waiting")),
+                        PeopleJob.id != job_id,
+                    )
+                ).all()
+                if (
+                    sum(
+                        j.status == "running" or bool(j.upstream.get("run_id"))
+                        for j in in_flight
+                    )
+                    >= PROFILE_CONCURRENCY
+                ):
+                    return
+            claimed = session.execute(
+                update(PeopleJob)
+                .where(PeopleJob.id == job_id, PeopleJob.status == old_status)
+                .values(status="running")
+            )
+            if not claimed.rowcount:
+                session.rollback()
+                return
+            job.attempts += 1
+            session.commit()
         repo = WorkspaceRepository(session, job.workspace_id)
         stage = "read"
         try:
@@ -284,22 +463,28 @@ def process_job(job_id):
             if contact:
                 verify_identity(contact, job.input["contact"])
             if job.kind == "search":
-                filters = {k: v for k, v in job.input.items() if k != "mode"}
-                result = people_search().search(filters)
-                found = [upsert_search(repo, item) for item in result["people"]]
-                job.result = {
-                    "contact_ids": [c.id for c in found],
-                    "total": result["total"],
-                    "page": filters["page"],
-                    "per_page": filters["per_page"],
-                    "mode": settings.people_mode,
-                    "has_more": result.get(
-                        "has_more",
-                        filters["page"] * filters["per_page"] < result["total"],
-                    ),
-                    "total_is_estimate": result.get("total_is_estimate", False),
-                }
-                job.status = "succeeded"
+                if "contact_ids" not in job.result:
+                    filters = {k: v for k, v in job.input.items() if k != "mode"}
+                    result = people_search().search(filters)
+                    found = [
+                        upsert_search(repo, item)
+                        for item in result["people"][: filters["per_page"]]
+                    ]
+                    job.result = {
+                        "contact_ids": list(dict.fromkeys(c.id for c in found)),
+                        "total": result["total"],
+                        "page": filters["page"],
+                        "per_page": filters["per_page"],
+                        "mode": settings.people_mode,
+                        "has_more": result.get(
+                            "has_more",
+                            filters["page"] * filters["per_page"] < result["total"],
+                        ),
+                        "total_is_estimate": result.get("total_is_estimate", False),
+                        "phase": "profiles",
+                    }
+                    session.commit()
+                prepare_search_profiles(repo, job)
             elif job.kind == "email":
                 data = people_enrichment().enrich(job.input["contact"])
                 contact = lock_contact(repo, job.contact_id)
@@ -364,6 +549,13 @@ def process_job(job_id):
                     )
             job.error = ""
             session.commit()
+        except LocalProviderRateLimit as exc:
+            session.rollback()
+            job = session.get(PeopleJob, job_id)
+            job.status = "waiting"
+            job.next_poll_at = now() + timedelta(seconds=61)
+            job.error = str(exc.detail)
+            session.commit()
         except Exception as exc:
             # Roll back partial enrichment while retaining the durable job record.
             session.rollback()
@@ -402,7 +594,9 @@ def recover_jobs():
         for job in session.scalars(
             select(PeopleJob).where(PeopleJob.status == "running")
         ):
-            if job.kind in ("profile", "email_apify") and job.upstream.get("run_id"):
+            if (job.kind == "search" and "contact_ids" in job.result) or (
+                job.kind in ("profile", "email_apify") and job.upstream.get("run_id")
+            ):
                 job.status = "waiting"
                 job.next_poll_at = now()
             else:

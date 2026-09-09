@@ -27,6 +27,10 @@ _calls = defaultdict(deque)
 _lock = Lock()
 
 
+class LocalProviderRateLimit(HTTPException):
+    """No network request has occurred; background jobs can safely defer."""
+
+
 def budget(provider: str):
     # Per-process limit across requests and background jobs. Every upstream request is counted.
     with _lock:
@@ -34,7 +38,7 @@ def budget(provider: str):
         while calls and calls[0] < clock - 60:
             calls.popleft()
         if len(calls) >= settings.provider_calls_per_minute:
-            raise HTTPException(
+            raise LocalProviderRateLimit(
                 429, f"{provider}: local call limit reached. Retry in a minute."
             )
         calls.append(clock)

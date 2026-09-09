@@ -1,12 +1,13 @@
 # Customer registration and administration
 
-The Render trial uses public email registration and a separate administrator account. Website: <https://connact-ai.onrender.com>. Deployment details and free-plan limits are in [render-trial.md](render-trial.md). Gmail sending is not connected; users can copy reviewed messages or export an unsent `.eml` file.
+The previously verified Render trial uses public email registration and a separate administrator account. Website: <https://connact-ai.onrender.com>. The current code also supports replacing password login with Google sign-in; follow [Google client creation and migration](google-sign-in.md) before switching a deployment. This code change alone does not configure or deploy Google credentials. Deployment details and free-plan limits are in [render-trial.md](render-trial.md). Gmail sending is not connected; users can copy reviewed messages or export an unsent `.eml` file.
 
 ## Access
 
 - `AUTH_MODE=local`: private localhost development workspace.
 - `AUTH_MODE=open`: email registration without invitation; each account has an independent workspace. Existing invited accounts keep their data and passwords.
 - `AUTH_MODE=invite`: optional restricted registration retained for other installations.
+- `AUTH_PROVIDER=google`: Google sign-in/sign-up with verified identities; password login/join endpoints are disabled. Requires backend OAuth credentials and an exact registered frontend callback. `AUTH_PROVIDER=password` retains the legacy behavior described below during migration.
 - Public modes require an exact HTTPS `PUBLIC_ORIGIN`. Sessions use HttpOnly, SameSite cookies and expire after `SESSION_DAYS` (default 7). Login and registration retain server-side rate limits.
 
 Registration only accepts email and password (at least 12 characters); it cannot assign administrator roles. The login form also accepts the reserved `admin` username. Registration discloses administrator access to saved information and uploaded files.
@@ -25,4 +26,4 @@ Original PDF/DOCX uploads (maximum 8 MB) are stored in PostgreSQL together with 
 
 Run one backend process. People, document and writing jobs persist in the database; ambiguous interrupted provider calls surface as failures rather than silently repeating charges. Provider keys remain exclusively on the backend. Public registration does not configure or grant access to paid upstream providers.
 
-There is no email verification, self-service password recovery, mailbox OAuth, email sending or per-customer billing. Back up the database, including `document_files`, to preserve account data and original uploads.
+Google sign-in validates Google's verified email claim; legacy password registration does not verify email. There is no self-service password recovery, mailbox OAuth, email sending or per-customer billing. Back up the database, including `document_files`, to preserve account data and original uploads.

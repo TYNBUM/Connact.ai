@@ -209,8 +209,11 @@ test("resume upload, rich text, independent writing language and future routes",
   await expect(page.locator(".email-content strong")).toContainText(
     "bold text",
   );
+  await page.goto("/templates");
+  await expect(
+    page.getByRole("region", { name: "Email template library" }),
+  ).toBeVisible();
   for (const route of [
-    "templates",
     "mailboxes",
     "inbox",
     "campaigns",

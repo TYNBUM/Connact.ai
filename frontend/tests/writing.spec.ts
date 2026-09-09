@@ -30,6 +30,7 @@ async function writingFixture(page: Page) {
         providers: {},
       });
     if (path === "/personas" || path === "/contacts") return reply([]);
+    if (path === "/writing-templates") return reply([]);
     if (path === "/ai/models")
       return reply({
         mode: "mock",
@@ -373,11 +374,28 @@ test("prompt and template modes save independently and do not require a persona 
   const fixture = await writingFixture(page),
     id = await createDraft(page);
   await page.getByRole("button", { name: "Prompt", exact: true }).click();
+  await expect(
+    page.getByLabel("What would you like to connect about?"),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Additional instructions")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Prompt editor", exact: true }),
+  ).toBeVisible();
   await page
-    .getByLabel("Additional instructions")
+    .getByRole("button", { name: "Ask for advice", exact: true })
+    .click();
+  await expect(page.getByLabel("Your prompt", { exact: true })).toHaveValue(
+    /informational interview/,
+  );
+  await page
+    .getByLabel("Your prompt", { exact: true })
     .fill(
       "Write an introduction asking about equity research, without making up my background.",
     );
+  await page.getByText("Preview writing request", { exact: true }).click();
+  await expect(page.locator(".email-request-preview")).toContainText(
+    "equity research",
+  );
   await page
     .getByRole("button", { name: "Generate email", exact: true })
     .click();
@@ -391,6 +409,10 @@ test("prompt and template modes save independently and do not require a persona 
   await page.getByRole("button", { name: "Refresh suggestions" }).click();
   await page.getByRole("button", { name: "Discard", exact: true }).click();
   await page.getByRole("button", { name: "Template", exact: true }).click();
+  await expect(page.getByLabel("Your prompt", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Email template library", exact: true }),
+  ).toBeVisible();
   await page
     .getByRole("textbox", { name: "Email body" })
     .fill("Hi {{name}}, I would like to learn about your work at {{company}}.");
@@ -402,6 +424,141 @@ test("prompt and template modes save independently and do not require a persona 
   await expect(page.getByRole("textbox", { name: "Email body" })).toContainText(
     "{{company}}",
   );
+});
+
+test("email templates upload, persist across drafts, and resolve in a real preview", async ({
+  page,
+}) => {
+  // Actual workspace API, with no AI request or paid-provider call.
+  const originalId = await createDraft(page);
+  await page.getByRole("button", { name: "Template", exact: true }).click();
+  await expect(page.locator(".email-template-list > button")).toHaveCount(3);
+  await page.getByRole("button", { name: "Use template", exact: true }).click();
+  await expect(page.getByLabel("Subject", { exact: true })).toHaveValue(
+    "A quick introduction, {{name}}",
+  );
+  await page
+    .getByLabel("Subject", { exact: true })
+    .fill("Research conversation for {{name}}");
+  await page
+    .getByRole("textbox", { name: "Email body", exact: true })
+    .fill("Hi {{name}}, could we discuss your work at {{company}}?");
+  await page
+    .getByRole("button", { name: "Save email as template", exact: true })
+    .click();
+  await page
+    .getByLabel("Template name", { exact: true })
+    .fill("Research conversation reusable");
+  await page
+    .getByLabel("Template description", { exact: true })
+    .fill("A reusable research outreach email");
+  await page
+    .getByRole("button", { name: "Save new template", exact: true })
+    .click();
+  await expect(
+    page
+      .locator(".email-template-list > button")
+      .filter({ hasText: "Research conversation reusable" }),
+  ).toBeVisible();
+
+  await page.reload();
+  await expect(
+    page
+      .locator(".email-template-list > button")
+      .filter({ hasText: "Research conversation reusable" }),
+  ).toBeVisible();
+  const secondId = await createDraft(page);
+  expect(secondId).not.toBe(originalId);
+  await page.getByRole("button", { name: "Template", exact: true }).click();
+  await page
+    .getByLabel("Template collection", { exact: true })
+    .selectOption("saved");
+  await page
+    .locator(".email-template-list > button")
+    .filter({ hasText: "Research conversation reusable" })
+    .click();
+  await page.getByRole("button", { name: "Use template", exact: true }).click();
+  await expect(page.getByLabel("Subject", { exact: true })).toHaveValue(
+    "Research conversation for {{name}}",
+  );
+  const contact = await (
+    await page.request.post("/api/contacts", {
+      data: { name: "Jordan Template", company: "Example Research" },
+    })
+  ).json();
+  await page.reload();
+  await page
+    .getByLabel("To · Contact", { exact: true })
+    .selectOption(contact.id);
+  await page
+    .getByRole("button", { name: "Preview & copy", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "Research conversation for Jordan Template",
+  );
+  await expect(page.getByRole("dialog")).toContainText("Example Research");
+  await page
+    .getByRole("button", { name: "Close details", exact: true })
+    .click();
+
+  await page
+    .getByLabel("Upload email template JSON", { exact: true })
+    .setInputFiles({
+      name: "follow-up.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({
+          name: "Imported follow-up",
+          subject: "A short follow-up",
+          body_html:
+            '<p>Following up, {{name}}.</p><img src=x onerror="alert(1)">',
+        }),
+      ),
+    });
+  await expect(
+    page
+      .locator(".email-template-list > button")
+      .filter({ hasText: "Imported follow-up" }),
+  ).toBeVisible();
+  await expect(page.locator(".email-template-preview img")).toHaveCount(0);
+  await page.reload();
+  await expect(
+    page
+      .locator(".email-template-list > button")
+      .filter({ hasText: "Imported follow-up" }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Upload email template JSON", { exact: true })
+    .setInputFiles({
+      name: "broken.json",
+      mimeType: "application/json",
+      buffer: Buffer.from("not JSON"),
+    });
+  await expect(
+    page
+      .getByRole("region", { name: "Email template library" })
+      .getByRole("alert"),
+  ).toContainText("not valid JSON");
+  await expect(page.getByLabel("Subject", { exact: true })).toHaveValue(
+    "Research conversation for {{name}}",
+  );
+  await page.goto("/templates");
+  await expect(
+    page.getByRole("heading", { name: "Email templates", exact: true }),
+  ).toBeVisible();
+  await page
+    .locator(".email-template-list > button")
+    .filter({ hasText: "Imported follow-up" })
+    .click();
+  await page
+    .getByRole("button", { name: "Create draft from template", exact: true })
+    .click();
+  await expect(page.getByLabel("Subject", { exact: true })).toHaveValue(
+    "A short follow-up",
+  );
+  await expect(
+    page.getByRole("textbox", { name: "Email body", exact: true }),
+  ).toContainText("Following up, {{name}}.");
 });
 
 test("provider groups disable missing keys and persist the selected route", async ({

@@ -4,6 +4,7 @@ from app.config import settings
 from app.db import Base
 from app import models
 from app import auth_models
+from app import sequence_models, writing_template_models
 
 
 def run():

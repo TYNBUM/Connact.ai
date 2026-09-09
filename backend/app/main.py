@@ -7,11 +7,15 @@ from sqlalchemy import select, text
 from .db import Session, get_repo
 from .models import Workspace
 from .config import settings
-from .routers import personas, contacts, finance, drafts, auth, export, admin
+from .routers import personas, contacts, finance, drafts, auth, export, admin, sequences, writing_templates
 from .services.drafts import start_writing_worker, stop_writing_worker
 from .services.people_jobs import start_people_worker, stop_people_worker
 from .services.documents import start_document_worker, stop_document_worker
 from .services.file_storage import preserve_legacy_files
+from .services.sequences import start_sequence_worker, stop_sequence_worker
+from .services.auth_logging import configure_auth_log_redaction
+
+configure_auth_log_redaction()
 
 
 @asynccontextmanager
@@ -28,9 +32,11 @@ async def lifespan(app):
     start_writing_worker()
     start_people_worker()
     start_document_worker()
+    start_sequence_worker()
     try:
         yield
     finally:
+        stop_sequence_worker()
         stop_document_worker()
         stop_people_worker()
         stop_writing_worker()
@@ -58,7 +64,7 @@ async def local_origin(request: Request, call_next):
     response = await call_next(request)
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers.setdefault("Referrer-Policy", "same-origin")
     return response
 
 
@@ -98,5 +104,5 @@ def config(request: Request, repo=Depends(get_repo)):
     }
 
 
-for router in (personas.router, contacts.router, finance.router, drafts.router, auth.router, export.router, admin.router):
+for router in (personas.router, contacts.router, finance.router, drafts.router, auth.router, export.router, admin.router, sequences.router, writing_templates.router):
     app.include_router(router, prefix="/api")

@@ -30,6 +30,9 @@ import type {
 import { useDraft } from "@/lib/use-draft";
 import { Heading, Field, Badge, Busy, Nav, Drawer, DateLabel } from "./ui";
 import RichEditor from "./rich-editor";
+import WritingPrompt from "./writing-prompt";
+import WritingTemplateLibrary from "./writing-template-library";
+import "./email-writing.css";
 
 export default function EmailStudio() {
   const { t, drafts, refresh, go, notify, guard } = useApp(),
@@ -159,7 +162,17 @@ export default function EmailStudio() {
   );
 }
 
-function DraftEditor({ id }: { id: string }) {
+export function DraftEditor({
+  id,
+  replySubject,
+  loadPreview,
+  disabled = false,
+}: {
+  id: string;
+  replySubject?: string;
+  loadPreview?: () => Promise<Preview>;
+  disabled?: boolean;
+}) {
   const { t, personas, contacts, refresh, notify, config } = useApp();
   const {
     draft,
@@ -172,7 +185,7 @@ function DraftEditor({ id }: { id: string }) {
     loadLatest,
     setError,
   } = useDraft(id);
-  const [busy, setBusy] = useState(false),
+  const [working, setBusy] = useState(false),
     [preview, setPreview] = useState<Preview | null>(null),
     [extra, setExtra] = useState<Contact | null>(null),
     [showVariables, setShowVariables] = useState(false),
@@ -182,6 +195,7 @@ function DraftEditor({ id }: { id: string }) {
     [jobsError, setJobsError] = useState(""),
     [jobsVersion, setJobsVersion] = useState(0),
     [showHistory, setShowHistory] = useState(false);
+  const busy = working || disabled;
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -334,11 +348,33 @@ function DraftEditor({ id }: { id: string }) {
     setBusy(true);
     try {
       await flush();
-      setPreview(await api<Preview>("/drafts/" + id + "/preview"));
+      setPreview(
+        await (loadPreview
+          ? loadPreview()
+          : api<Preview>("/drafts/" + id + "/preview")),
+      );
     } catch (e) {
       setError(errorText(e));
     } finally {
       setBusy(false);
+    }
+  }
+  async function applyTemplate(content: Pick<Draft, "subject" | "body_html">) {
+    setBusy(true);
+    try {
+      // Preserve this tab's save/conflict rules before replacing email content.
+      await flush();
+      if (!active.current) return;
+      edit({
+        ...(replySubject === undefined
+          ? content
+          : { body_html: content.body_html }),
+        writing_mode: "template",
+      });
+      await flush();
+      await refresh();
+    } finally {
+      if (active.current) setBusy(false);
     }
   }
   async function save() {
@@ -459,20 +495,20 @@ function DraftEditor({ id }: { id: string }) {
                 ? t("Assisted", "引导写作")
                 : mode === "prompt"
                   ? t("Prompt", "自定义 Prompt")
-                  : t("Template", "手写模板")}
+                  : t("Template", "邮件模板")}
             </button>
           ))}
         </div>
         <p className="writing-mode-hint">
           {draft.writing_mode === "prompt"
             ? t(
-                "Write your own prompt in Additional instructions. Choose a contact whenever you want a personalized preview.",
-                "在补充要求中编写自定义 Prompt。可随时选择联系人，生成个性化预览。",
+                "Control the message with your own prompt, then review the AI suggestion before inserting it.",
+                "用自定义 Prompt 控制邮件内容，审核 AI 建议后再插入。",
               )
             : draft.writing_mode === "template"
               ? t(
-                  "Write your reusable template in the editor below, with variables if needed. Generate a personalized preview for a selected contact.",
-                  "在下方正文编辑器编写可复用模板，可插入变量。选择联系人后可生成个性化预览。",
+                  "Use a saved template or create your own. Edit it directly or ask AI to personalize it.",
+                  "使用已保存模板或创建自定义模板，可直接编辑或请 AI 生成个性化内容。",
                 )
               : t(
                   "Describe your context and goal. Add a contact and persona whenever useful, then review the generated preview.",
@@ -480,6 +516,48 @@ function DraftEditor({ id }: { id: string }) {
                 )}
         </p>
         <fieldset disabled={busy}>
+          {draft.writing_mode === "prompt" && (
+            <WritingPrompt draft={draft} edit={edit} />
+          )}
+          {draft.writing_mode === "template" && (
+            <WritingTemplateLibrary
+              draft={
+                replySubject === undefined
+                  ? draft
+                  : { ...draft, subject: replySubject }
+              }
+              disabled={busy}
+              flush={async () => {
+                const saved = await flush();
+                return saved && replySubject !== undefined
+                  ? { ...saved, subject: replySubject }
+                  : saved;
+              }}
+              bodyOnly={replySubject !== undefined}
+              onApply={applyTemplate}
+            />
+          )}
+          {(draft.writing_mode || "assisted") === "assisted" && (
+            <div
+              className="email-mode-intro"
+              aria-label={t("Assisted writing", "引导写作")}
+            >
+              <strong>
+                {t("Build a brief, one detail at a time", "逐项填写写作要求")}
+              </strong>
+              <p>
+                {t(
+                  "Set the purpose and next step, choose your style, and select evidence to make the message relevant.",
+                  "设置联系目的与下一步，选择写作风格及证据，让邮件贴合收件人。",
+                )}
+              </p>
+            </div>
+          )}
+          {draft.writing_mode !== "assisted" && (
+            <p className="email-shared-context-label">
+              {t("Personalization & AI settings", "个性化与 AI 设置")}
+            </p>
+          )}
           <div className="form-grid">
             <Field label={t("To · Contact", "收件人 · 联系人")}>
               <select
@@ -516,18 +594,20 @@ function DraftEditor({ id }: { id: string }) {
                 ))}
               </select>
             </Field>
-            <Field label={t("Writing starting point", "写作场景")}>
-              <select
-                value={draft.starting_point}
-                onChange={(e) => edit({ starting_point: e.target.value })}
-              >
-                <option>Networking</option>
-                <option>Informational Interview</option>
-                <option>Recruiting</option>
-                <option>Follow-up</option>
-                <option>Introduction</option>
-              </select>
-            </Field>
+            {(draft.writing_mode || "assisted") === "assisted" && (
+              <Field label={t("Writing starting point", "写作场景")}>
+                <select
+                  value={draft.starting_point}
+                  onChange={(e) => edit({ starting_point: e.target.value })}
+                >
+                  <option>Networking</option>
+                  <option>Informational Interview</option>
+                  <option>Recruiting</option>
+                  <option>Follow-up</option>
+                  <option>Introduction</option>
+                </select>
+              </Field>
+            )}
             <Field label={t("Email language", "邮件语言")}>
               <select
                 aria-label="Email language"
@@ -540,36 +620,42 @@ function DraftEditor({ id }: { id: string }) {
                 <option value="zh">简体中文</option>
               </select>
             </Field>
-            <Field
-              label={t(
-                "What would you like to connect about?",
-                "您希望就什么目的联系？",
-              )}
-              className="full"
-            >
-              <textarea
-                rows={3}
-                value={draft.purpose}
-                onChange={(e) => edit({ purpose: e.target.value })}
-                placeholder={t(
-                  "Describe your background, what you offer or want to learn, and why this conversation matters.",
-                  "说明您的背景、可提供的价值或希望了解的问题，以及联系的原因。 ",
+            {(draft.writing_mode || "assisted") === "assisted" && (
+              <Field
+                label={t(
+                  "What would you like to connect about?",
+                  "您希望就什么目的联系？",
                 )}
-              />
-            </Field>
-            <Field
-              label={t("Call to action", "期望对方采取的行动")}
-              className="full"
-            >
-              <input
-                value={draft.cta || ""}
-                onChange={(e) => edit({ cta: e.target.value })}
-                placeholder={t(
-                  "e.g. A 15-minute conversation next week",
-                  "例如：下周安排 15 分钟交流",
-                )}
-              />
-            </Field>
+                className="full"
+              >
+                <textarea
+                  rows={3}
+                  maxLength={4000}
+                  value={draft.purpose}
+                  onChange={(e) => edit({ purpose: e.target.value })}
+                  placeholder={t(
+                    "Describe your background, what you offer or want to learn, and why this conversation matters.",
+                    "说明您的背景、可提供的价值或希望了解的问题，以及联系的原因。 ",
+                  )}
+                />
+              </Field>
+            )}
+            {(draft.writing_mode || "assisted") === "assisted" && (
+              <Field
+                label={t("Call to action", "期望对方采取的行动")}
+                className="full"
+              >
+                <input
+                  maxLength={2000}
+                  value={draft.cta || ""}
+                  onChange={(e) => edit({ cta: e.target.value })}
+                  placeholder={t(
+                    "e.g. A 15-minute conversation next week",
+                    "例如：下周安排 15 分钟交流",
+                  )}
+                />
+              </Field>
+            )}
             <Field label={t("Writing tone", "写作语气")}>
               <select
                 aria-label="Writing tone"
@@ -635,20 +721,25 @@ function DraftEditor({ id }: { id: string }) {
                 ))}
               </select>
             </Field>
-            <Field
-              label={t("Additional instructions", "补充要求")}
-              className="full"
-            >
-              <textarea
-                rows={2}
-                value={draft.custom_instructions || ""}
-                onChange={(e) => edit({ custom_instructions: e.target.value })}
-                placeholder={t(
-                  "e.g. Avoid clichés. Refer to a shared school only when supported by evidence.",
-                  "例如：避免套话，仅在证据支持时提及共同学校。 ",
-                )}
-              />
-            </Field>
+            {draft.writing_mode !== "prompt" && (
+              <Field
+                label={t("Additional instructions", "补充要求")}
+                className="full"
+              >
+                <textarea
+                  rows={2}
+                  maxLength={6000}
+                  value={draft.custom_instructions || ""}
+                  onChange={(e) =>
+                    edit({ custom_instructions: e.target.value })
+                  }
+                  placeholder={t(
+                    "e.g. Avoid clichés. Refer to a shared school only when supported by evidence.",
+                    "例如：避免套话，仅在证据支持时提及共同学校。 ",
+                  )}
+                />
+              </Field>
+            )}
           </div>
           <details
             className="writing-evidence"
@@ -985,12 +1076,20 @@ function DraftEditor({ id }: { id: string }) {
           <label htmlFor="subject">{t("Subject", "主题")}</label>
           <input
             id="subject"
-            value={draft.subject}
+            value={replySubject === undefined ? draft.subject : replySubject}
             placeholder={t("A subject worth opening", "输入邮件主题")}
-            disabled={busy}
+            disabled={busy || replySubject !== undefined}
             onChange={(e) => edit({ subject: e.target.value })}
           />
         </div>
+        {replySubject !== undefined && (
+          <p className="email-reply-subject-note">
+            {t(
+              "Reply step: the subject follows the earlier email in this thread. Change it on the step that starts this thread.",
+              "回复步骤的主题继承此会话中的上一封邮件，请在开启此会话的步骤中修改。",
+            )}
+          </p>
+        )}
         <RichEditor
           value={draft.body_html}
           disabled={busy}
@@ -1136,34 +1235,36 @@ function DraftEditor({ id }: { id: string }) {
                 <Copy size={15} />
                 {t("Copy body", "复制正文")}
               </button>
-              <a
-                className="button"
-                href={
-                  preview.can_mark_ready && preview.recipient_email
-                    ? `/api/drafts/${id}/export.eml`
-                    : undefined
-                }
-                aria-disabled={
-                  !preview.can_mark_ready || !preview.recipient_email || busy
-                }
-                onClick={(event) => {
-                  event.preventDefault();
-                  if (
-                    !preview.can_mark_ready ||
-                    !preview.recipient_email ||
-                    busy
-                  )
-                    return;
-                  void flush()
-                    .then(() => {
-                      window.location.assign(`/api/drafts/${id}/export.eml`);
-                    })
-                    .catch((e) => setError(errorText(e)));
-                }}
-              >
-                <Download size={15} />
-                {t("Download email (.eml)", "下载邮件（.eml）")}
-              </a>
+              {replySubject === undefined && (
+                <a
+                  className="button"
+                  href={
+                    preview.can_mark_ready && preview.recipient_email
+                      ? `/api/drafts/${id}/export.eml`
+                      : undefined
+                  }
+                  aria-disabled={
+                    !preview.can_mark_ready || !preview.recipient_email || busy
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+                    if (
+                      !preview.can_mark_ready ||
+                      !preview.recipient_email ||
+                      busy
+                    )
+                      return;
+                    void flush()
+                      .then(() => {
+                        window.location.assign(`/api/drafts/${id}/export.eml`);
+                      })
+                      .catch((e) => setError(errorText(e)));
+                  }}
+                >
+                  <Download size={15} />
+                  {t("Download email (.eml)", "下载邮件（.eml）")}
+                </a>
+              )}
               <button
                 className="button dark"
                 onClick={() => void copy("both", preview)}
@@ -1173,19 +1274,26 @@ function DraftEditor({ id }: { id: string }) {
               </button>
             </div>
             <div className="ready-section">
-              <button
-                className="button primary"
-                disabled={!preview.can_mark_ready || busy}
-                onClick={() => void ready()}
-              >
-                <Check size={16} />
-                {t("Mark as reviewed & ready", "标记已审核且可用")}
-              </button>
+              {replySubject === undefined && (
+                <button
+                  className="button primary"
+                  disabled={!preview.can_mark_ready || busy}
+                  onClick={() => void ready()}
+                >
+                  <Check size={16} />
+                  {t("Mark as reviewed & ready", "标记已审核且可用")}
+                </button>
+              )}
               <p>
-                {t(
-                  "Requires a recipient, subject, body and resolved variables. This marks the content only; no email is sent.",
-                  "需选择收件人并补齐主题、正文和变量。这只标记内容状态，不会发送邮件。",
-                )}
+                {replySubject !== undefined
+                  ? t(
+                      "Review this reply with the full sequence in Preview & review. Copy uses the inherited subject shown here.",
+                      "请在序列的预览与审核中审核此回复。复制内容使用此处显示的继承主题。",
+                    )
+                  : t(
+                      "Requires a recipient, subject, body and resolved variables. This marks the content only; no email is sent.",
+                      "需选择收件人并补齐主题、正文和变量。这只标记内容状态，不会发送邮件。",
+                    )}
               </p>
             </div>
           </div>

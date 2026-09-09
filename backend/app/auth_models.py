@@ -1,4 +1,4 @@
-"""Invite-only accounts and opaque, revocable sessions."""
+"""Workspace accounts, Google identities, and opaque, revocable sessions."""
 from datetime import datetime
 from sqlalchemy import String, ForeignKey, DateTime, Integer, Boolean, false
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,3 +31,22 @@ class Invitation(Identity, Base):
     use_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GoogleIdentity(Identity, Base):
+    __tablename__ = "google_identities"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True)
+    subject: Mapped[str] = mapped_column(String(255), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class GoogleOAuthState(Identity, Base):
+    __tablename__ = "google_oauth_states"
+    state_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    browser_hash: Mapped[str] = mapped_column(String(64))
+    nonce_hash: Mapped[str] = mapped_column(String(64))
+    code_verifier: Mapped[str] = mapped_column(String(128))
+    next_path: Mapped[str] = mapped_column(String(2000))
+    invitation_hash: Mapped[str | None] = mapped_column(String(64))
+    linking_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

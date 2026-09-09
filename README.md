@@ -4,7 +4,7 @@ A runnable networking and AI email-writing workspace with persistent background 
 
 Implemented: resume parsing or manually created persona → people search → evidence-based recommendations → save contact → generate and edit email → auto-save → final variable preview → copy content.
 
-Includes live SerpAPI discovery, Apify professional profiles and optional work-email lookup, Bailian multi-model writing, independent saved personas/contacts/drafts, asynchronous suggestions, and `.eml` export. Gmail OAuth, in-app sending and automated sequences are not implemented.
+Includes live SerpAPI discovery, Apify professional profiles and optional work-email lookup, multi-provider writing, independent saved personas/contacts/drafts, asynchronous suggestions, reusable email templates, connected sequence planning, and `.eml` export. Sequences support draft import, three default step templates, custom JSON templates, and progressive AI planning. Gmail OAuth, in-app sending and automatic sequence execution are not implemented.
 
 See [September 8 delivery and validation](docs/customer-ready-2026-09-08.md), [customer trial setup](docs/customer-trial.md), and [Apollo Sequence design observations](docs/apollo-sequence-writing.md).
 
@@ -68,7 +68,7 @@ cd frontend
 npm run dev
 ```
 
-Default `AUTH_MODE=local` is a personal development workspace and must stay bound to localhost. `AUTH_MODE=open` enables email registration without an invitation, password login, expiring/revocable HttpOnly sessions, and a separate server-derived workspace for every customer. Administrators can inspect accounts, saved workspace records, and original uploads at `/admin`; every admin API and download requires a server-verified administrator role. `AUTH_MODE=invite` remains available for restricted deployments. Use the [customer trial deployment guide](docs/customer-trial.md) for HTTPS hosting. Run one backend process; workers and rate limits are not distributed.
+Default `AUTH_MODE=local` is a personal development workspace and must stay bound to localhost. For Google sign-in, set `AUTH_MODE=open`, `AUTH_PROVIDER=google`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`; follow the [Google client creation and migration guide](docs/google-sign-in.md). `AUTH_MODE=invite` restricts new-account creation. Existing deployments can retain `AUTH_PROVIDER=password` during migration. Both account modes use expiring/revocable HttpOnly sessions and a server-derived workspace for every customer. Administrators can inspect accounts, saved workspace records, and original uploads at `/admin`; every admin API and download requires a server-verified administrator role. The legacy `admin` username requires an explicit migration before replacing its password login. Use the [customer trial deployment guide](docs/customer-trial.md) for HTTPS hosting. Run one backend process; workers and rate limits are not distributed.
 
 ## Demo and Usage
 
@@ -76,10 +76,11 @@ The seed command creates 1 fictional persona, 3 saved fictional contacts, and 2 
 
 1. **Personas**: Create or select a persona, upload `demo/sample-resume.pdf` / `demo/sample-resume.docx`, check fields, edit, and save; you can also fill in everything manually.
 2. **People Search**: Search by job title, company, region, keyword, or financial field. After selecting a persona, click **Recommend first 5**; you can also recommend one person individually in the details.
-3. **Contact Details**: View information, source, acquisition date, persona version, and recommendation rationale; save, or trigger email enrichment or public-profile evidence separately. Re-saving an existing contact will prompt that it already exists.
-4. **Email Studio**: Start writing an email from a contact or create a blank draft independently. Choose the contact purpose and writing starting point, then generate, shorten, or adjust the tone. You can also manually edit directly.
+3. **Contact Details**: Each live search page prepares public professional details automatically before displaying its people. Click a person to read the prepared work history, education, skills and summary; unavailable details are marked. Email lookup remains a separate action. Re-saving an existing contact will prompt that it already exists.
+4. **Email Studio**: Start independently or from a contact. **Assisted** provides a structured brief and selected evidence, **Prompt** provides an editable prompt with starter prompts, and **Template** provides reusable subject/body templates with variables. Generate, shorten, or adjust the tone; review and insert suggestions explicitly. **Templates** also opens the reusable email library directly.
 5. Drafts are automatically saved to the server approximately 650 ms after stopping input; page navigation will wait for the save first. You can click **Save draft**. If the save fails, the local edit is retained and a prompt is shown, but the save success is not displayed.
 6. **Preview & copy**: Replace variables, check for missing items, and copy subject/body/entire content. Missing variables cannot be marked as Reviewed & ready. Missing email addresses do not prevent draft creation; Reviewed only indicates content review, not sending, email verification, or actual deliverability.
+7. **Sequences**: Create from AI, a step template, selected drafts, or a blank workflow. Edit connected email steps, their intervals and reply threading; apply a contact/persona, preview the complete conversation, then mark it reviewed. Save any plan as a reusable step template or upload/download its JSON. See the [sequence planning guide](docs/sequence-planning.md).
 
 The language switcher in the top right corner toggles between English / Simplified Chinese; the language of emails in the editor is independently controlled and does not change with the interface language. The interface language is stored in the browser; all business data is stored on the server side.
 
@@ -100,23 +101,23 @@ AI interfaces use a configurable Chat Completions-compatible format, requiring s
 - People Search: SerpAPI `GET /search.json`, `engine=google`, query `site:linkedin.com/in/` plus title/company/location/finance area/keywords. Returns up to 10 Google hits per page, filters out non-person URLs and duplicates, and saves each person's canonical LinkedIn URL. Google total is an estimate, not a count of verified people; pagination follows Google's next-page signal.
 - Apollo Email Matching: Select a person and click **Match with Apollo & get email**. The backend sends their LinkedIn URL to `POST /api/v1/people/match`. No Apollo People Search call precedes discovery. Existing Apollo-origin contacts can still enrich by Apollo ID. No request for personal emails or phone numbers. A different/missing returned LinkedIn URL or low/none match confidence is rejected without changing contact data. No match and matched-but-no-email have distinct states.
 - Evidence: Google title/snippet/link remain unverified SerpAPI evidence; search filters are never copied into company/location/sector facts. Apollo adds separate enrichment evidence on the same Contact. Identity or email edits invalidate the enrichment cache. Additional public-source lookup remains available through `PUBLIC_SEARCH_MODE`, with up to 3 results per request.
-- Max 10 people per page; max 5 recommendations per request. Emails and public-profile evidence are supplemented by users clicking individually. Recommendations for the same persona version/contact snapshot reuse cache; email enrichment cache is reused. Each real service has a default maximum of 20 calls per minute, with limits enforced on the server side, single-process operation.
+- Max 10 people per page; max 5 recommendations per request. Apify prepares the requested page's professional profiles in the background, with bounded concurrency and persistent success/error states. Successful profiles reuse a 168-hour cache by default. Email and additional public-source searches remain explicit actions. Recommendations for the same persona version/contact snapshot reuse cache; email enrichment cache is reused. Each real service has a default maximum of 20 calls per minute, with limits enforced on the server side, single-process operation.
 - Mock AI is a reproducible rule-based generator with clear markings, not a call to a real large model. Mock resume extraction extracts based on Chinese and English section titles; if the layout is not standard, it may only extract partial fields, requiring manual input from the original text. It does not fabricate missing professional information.
 
 Official documentation (as of 2026-09-06): [Apollo Search](https://docs.apollo.io/reference/people-api-search), [Apollo Enrichment](https://docs.apollo.io/reference/people-enrichment), [SerpAPI](https://serpapi.com/search-api), [Chat Completions](https://developers.openai.com/api/reference/cli/resources/chat/subresources/completions). Interface permissions, costs, and returned fields for real accounts are determined by the provider.
 
 ## Collaboration Design Between Apollo and LinkedIn Public-Profile Evidence
 
-The implemented sequence is **SerpAPI Google discovery → canonical LinkedIn URL → saved Contact**, with separate optional **Apify profile retrieval**, **Apollo/Apify work-email retrieval**, and **AI drafting** actions. Search does not automatically enrich every result; open the desired person and request their email. The canonical LinkedIn URL is the identity key, and returning to the same search reuses the Contact without discarding a previously enriched email.
+The implemented sequence is **SerpAPI Google discovery → canonical LinkedIn URL → automatically prepared Apify professional profile for the requested page → displayed Contact**. **Apollo/Apify work-email retrieval** and **AI drafting** remain separate actions. A page is displayed after each profile has either completed or recorded an explicit unavailable/error outcome; no next-page profiles or emails are automatically requested. The canonical LinkedIn URL is the identity key, and returning to the same search reuses the Contact without discarding a previously enriched email. See [profile preparation and live-provider verification](docs/people-provider-verification.md).
 
 SerpAPI searches Google-indexed public pages; it is not a direct LinkedIn API integration. The headline and snippet can be incomplete or stale. Apollo's returned profile URL must match before structured name, title, employer, location and email are attached. A URL match is identity consistency, not independent verification of every biographical claim or email deliverability.
 
-On 2026-09-07, live Google discovery returned 9 unique profiles for Goldman Sachs / Investment Banking / New York. Apollo was called with a discovered profile but returned HTTP 403 `API_INACCESSIBLE`: this account's Free plan excludes `people/match`. The app preserves search results and displays the permission error; real email retrieval remains blocked by account access. See [verification details](docs/verification.md).
+On 2026-09-07, live Google discovery returned 9 unique profiles for Goldman Sachs / Investment Banking / New York. Apollo then returned HTTP 403 `API_INACCESSIBLE` for that account's `people/match` request; this is historical account-specific evidence, not a current entitlement claim for every Free account. Professional detail uses Apify independently and does not require purchasing Apollo. See [verification details](docs/verification.md).
 
 ## Code Boundaries and Data Relationships
 
 ```text
-frontend/components/       six usable pages, shared UI, contact drawer, Tiptap editor
+frontend/components/       workspace pages, connected sequences, reusable templates, Tiptap editor
 frontend/lib/              types, request client, language context, serial auto-save
 frontend/app/api/          same-origin server proxy; vendor calls not exposed to client
 backend/app/models.py      Shared Core persistent models

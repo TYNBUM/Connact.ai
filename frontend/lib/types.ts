@@ -51,6 +51,14 @@ export type PeopleJob = {
     has_more?: boolean;
     total_is_estimate?: boolean;
     contact?: Contact;
+    phase?: "profiles" | "complete";
+    profile_progress?: {
+      total: number;
+      ready: number;
+      failed: number;
+      skipped: number;
+      pending: number;
+    };
   };
 };
 export type ProfessionalProfile = {
@@ -97,6 +105,12 @@ export type Contact = {
   assessments: Assessment[];
   drafts?: Draft[];
   professional?: ProfessionalProfile;
+  profile_prefetch?: {
+    status: PeopleJob["status"] | "skipped";
+    error: string;
+    cached?: boolean;
+    job_id?: string;
+  } | null;
   jobs?: PeopleJob[];
   missing_fields?: string[];
   phone?: string;

@@ -12,6 +12,12 @@ e2e_run_dir="$(mktemp -d "${TMPDIR:-/tmp}/connact-e2e.XXXXXX")"
 export E2E_API_PORT="${E2E_API_PORT:-8001}"
 export E2E_FRONTEND_PORT="${E2E_FRONTEND_PORT:-3101}"
 export AUTH_MODE="${E2E_AUTH_MODE:-local}"
+export AUTH_PROVIDER="${E2E_AUTH_PROVIDER:-password}" GOOGLE_CLIENT_ID='' GOOGLE_CLIENT_SECRET=''
+if [ "$AUTH_PROVIDER" = "google" ]; then
+  # Synthetic credentials exercise redirects/state only; never complete a Google exchange.
+  export GOOGLE_CLIENT_ID='isolated-e2e.apps.googleusercontent.com'
+  export GOOGLE_CLIENT_SECRET='isolated-e2e-not-a-real-secret'
+fi
 export NEXT_DIST_DIR="${E2E_NEXT_DIST_DIR:-.next-e2e}"
 export DATABASE_URL="sqlite:///$e2e_run_dir/workspace.db"
 export UPLOAD_DIR="$e2e_run_dir/uploads"

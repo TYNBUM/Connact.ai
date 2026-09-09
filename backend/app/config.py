@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     apify_max_charge_usd: float = 0.05
     people_cache_hours: int = 168
     auth_mode: Literal["local", "invite", "open"] = "local"
+    auth_provider: Literal["password", "google"] = "password"
+    google_client_id: str = ""
+    google_client_secret: str = ""
     bootstrap_admin_password_hash: str = ""
     public_origin: str = "http://127.0.0.1:3100"
     allowed_hosts: str = "localhost,127.0.0.1,backend,testserver"
@@ -91,6 +94,24 @@ class Settings(BaseSettings):
     bootstrap_invite_token_hash: str = ""
     bootstrap_invite_max_uses: int = Field(default=1, ge=1, le=1000)
     bootstrap_invite_expires_at: datetime | None = None
+
+    @field_validator("public_origin")
+    @classmethod
+    def canonical_public_origin(cls, value):
+        from urllib.parse import urlsplit
+
+        value = value.strip().rstrip("/")
+        url = urlsplit(value)
+        if (
+            url.scheme not in ("http", "https") or not url.hostname
+            or url.username or url.password or url.path or url.query or url.fragment
+            or "\\" in value or any(c.isspace() or ord(c) < 32 for c in value)
+            or (url.scheme == "http" and url.hostname not in ("localhost", "127.0.0.1", "::1"))
+        ):
+            raise ValueError("PUBLIC_ORIGIN must be an HTTPS origin (HTTP only for localhost), without a path or credentials.")
+        # Validate the port as well; callback URLs must come from trusted configuration.
+        _ = url.port
+        return value
 
     @field_validator("bootstrap_invite_expires_at")
     @classmethod

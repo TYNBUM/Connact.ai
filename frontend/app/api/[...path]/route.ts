@@ -36,6 +36,9 @@ async function proxy(
           ? undefined
           : await req.arrayBuffer(),
         cache: "no-store",
+        // OAuth redirects and cookies must reach the browser. Following them
+        // here would exchange the user's navigation for a server-side request.
+        redirect: "manual",
         signal: AbortSignal.timeout(190000),
       },
     );
@@ -44,7 +47,12 @@ async function proxy(
         response.headers.get("content-type") || "application/json",
       "Cache-Control": "no-store",
     });
-    for (const key of ["content-disposition", "x-content-type-options"])
+    for (const key of [
+      "content-disposition",
+      "x-content-type-options",
+      "location",
+      "referrer-policy",
+    ])
       if (response.headers.get(key))
         headers.set(key, response.headers.get(key)!);
     for (const cookie of response.headers.getSetCookie())
@@ -60,4 +68,4 @@ async function proxy(
     );
   }
 }
-export { proxy as GET, proxy as POST, proxy as PUT };
+export { proxy as GET, proxy as POST, proxy as PUT, proxy as DELETE };

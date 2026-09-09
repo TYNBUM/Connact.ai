@@ -21,6 +21,7 @@ import {
   Moon,
   Sun,
   ShieldCheck,
+  GitBranch,
 } from "lucide-react";
 import { AppProvider, useApp } from "@/lib/context";
 import { Nav } from "./ui";
@@ -30,6 +31,8 @@ import { PeopleSearch, Contacts } from "./people";
 import EmailStudio from "./email-studio";
 import AuthGate from "./auth-gate";
 import Admin from "./admin";
+import Sequences from "./sequences";
+import WritingTemplatesPage from "./writing-templates-page";
 import { post } from "@/lib/api";
 
 const main = [
@@ -38,9 +41,10 @@ const main = [
   ["/people", "People Search", "人员搜索", Search],
   ["/contacts", "Contacts", "联系人", Users],
   ["/email", "Email Studio", "邮件工作室", Mail],
+  ["/sequences", "Sequences", "邮件序列", GitBranch],
+  ["/templates", "Templates", "模板", Layers],
 ] as const;
 const later = [
-  ["/templates", "Templates", "模板", Layers],
   ["/mailboxes", "Mailboxes", "邮箱", Mail],
   ["/inbox", "Inbox", "收件箱", Inbox],
   ["/campaigns", "Campaigns", "外联活动", Send],
@@ -291,6 +295,10 @@ function Shell() {
             <Contacts />
           ) : path === "/email" ? (
             <EmailStudio />
+          ) : path === "/sequences" ? (
+            <Sequences />
+          ) : path === "/templates" ? (
+            <WritingTemplatesPage />
           ) : path === "/admin" ? (
             <Admin />
           ) : (

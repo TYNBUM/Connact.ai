@@ -175,10 +175,10 @@ export function PeopleSearch() {
         setPage(n);
         setSearched(true);
         setApplied(useFilters);
+        setBusy(false);
       }
     } catch (e) {
       setError(errorText(e));
-    } finally {
       setBusy(false);
     }
   }
@@ -277,8 +277,8 @@ export function PeopleSearch() {
         <p className="filter-note">
           {config?.people_mode === "live"
             ? t(
-                "Find public LinkedIn profiles through Google, then request work and education details from Apify or an email from Apollo independently. Search filters are keywords, not verified profile facts.",
-                "Google 发现 LinkedIn 公开资料后，可分别请求 Apify 补全履历教育、Apollo 获取邮箱。筛选项是搜索关键词，并非已核实的人物信息。",
+                "Each search prepares public work and education details for this page through Apify before showing results. Cached profiles are reused; new retrievals may use credits. Filters are search keywords, not verified facts.",
+                "每页搜索会先通过 Apify 自动准备公开履历与教育信息，再展示结果。已有资料会复用缓存，新查询可能消耗额度。筛选项是搜索关键词，并非已核实的人物信息。",
               )
             : t(
                 "16 fictional profiles for testing. All filters work on this demo dataset.",
@@ -318,10 +318,15 @@ export function PeopleSearch() {
           {busy && (
             <span className="muted">
               <Busy />{" "}
-              {t(
-                "Searching in background. You can switch pages and return.",
-                "后台搜索中，可切换页面后返回。",
-              )}
+              {searchJob?.result.profile_progress
+                ? t(
+                    `Preparing profile details: ${searchJob.result.profile_progress.total - searchJob.result.profile_progress.pending}/${searchJob.result.profile_progress.total}. You can leave and return.`,
+                    `正在准备人员详情：${searchJob.result.profile_progress.total - searchJob.result.profile_progress.pending}/${searchJob.result.profile_progress.total}。可离开后返回。`,
+                  )
+                : t(
+                    "Searching in background. You can switch pages and return.",
+                    "后台搜索中，可切换页面后返回。",
+                  )}
             </span>
           )}
           {searchJob?.status === "failed" && searchJob.retryable && (
@@ -386,7 +391,15 @@ export function PeopleSearch() {
           <Nav href="/personas">{t("Add background", "补充背景")}</Nav>
         </div>
       )}
-      {!searched ? (
+      {busy ? (
+        <div className="notice" role="status">
+          <Busy />
+          {t(
+            "Preparing this page and its profile details…",
+            "正在准备本页人员及其详情…",
+          )}
+        </div>
+      ) : !searched ? (
         <Empty
           title={t("Who would you like to meet?", "您想认识什么样的人？")}
           detail={t(
@@ -414,7 +427,7 @@ export function PeopleSearch() {
           )}
         />
       )}
-      {searched && (
+      {searched && !busy && (
         <div className="pagination">
           <span>
             {t(
@@ -448,8 +461,8 @@ export function PeopleSearch() {
       <div className="source-footnote">
         <Link2 size={14} />
         {t(
-          "Email availability is a provider signal, not a verified address. Enrichment is a separate action.",
-          "邮箱可用性只是数据源信号，并不等于已取得邮箱。信息补充需单独操作。",
+          "Open a person to read the prepared public profile. Unavailable details are marked; email lookup remains a separate action.",
+          "点击人员即可阅读已准备的公开详情；无法取得的信息会明确标记，查找邮箱仍需单独操作。",
         )}
       </div>
       {detail && (
@@ -457,6 +470,7 @@ export function PeopleSearch() {
           key={detail.id}
           contact={detail}
           personaId={personaId}
+          allowProfileFetch={false}
           onClose={() => setDetail(null)}
           onUpdate={update}
         />
@@ -541,6 +555,19 @@ export function PeopleTable({
                           ? "MOCK · FICTIONAL"
                           : c.provider.toUpperCase()}
                       </span>
+                      {c.profile_prefetch &&
+                        c.profile_prefetch.status !== "skipped" && (
+                          <small title={c.profile_prefetch.error || undefined}>
+                            {c.profile_prefetch.status === "succeeded"
+                              ? t("Profile ready", "详情已准备")
+                              : c.profile_prefetch.status === "failed"
+                                ? t(
+                                    "Some details unavailable",
+                                    "部分详情未取得",
+                                  )
+                                : t("Preparing details…", "详情准备中…")}
+                          </small>
+                        )}
                     </span>
                   </button>
                 </td>
@@ -757,11 +784,13 @@ export function ContactDrawer({
   personaId = "",
   onClose,
   onUpdate,
+  allowProfileFetch = true,
 }: {
   contact: Contact;
   personaId?: string;
   onClose: () => void;
   onUpdate: (c: Contact) => void;
+  allowProfileFetch?: boolean;
 }) {
   const { t, locale, personas, refresh, notify, go, config } = useApp();
   const active = useRef(true);
@@ -787,7 +816,7 @@ export function ContactDrawer({
     let active = true;
     api<Contact>("/contacts/" + contact.id)
       .then((c) => {
-        if (active) setC(c);
+        if (active) setC({ ...c, profile_prefetch: contact.profile_prefetch });
       })
       .catch((e) => {
         if (active) setError(errorText(e));
@@ -1038,7 +1067,7 @@ export function ContactDrawer({
       </section>
       <section className="drawer-section">
         <h3>{t("Professional profile", "履历与教育")}</h3>
-        {c.provider !== "mock" && (
+        {allowProfileFetch && c.provider !== "mock" && (
           <button
             className="button small-button"
             disabled={!!busy || pendingJobs.some((j) => j.kind === "profile")}
@@ -1051,6 +1080,15 @@ export function ContactDrawer({
             )}{" "}
             {t("Get profile details", "补全履历教育")} · Apify
           </button>
+        )}
+        {c.profile_prefetch?.status === "failed" && (
+          <p className="error-panel" role="status">
+            {t(
+              "Some public details could not be prepared: ",
+              "部分公开详情未能取得：",
+            )}
+            {c.profile_prefetch.error}
+          </p>
         )}
         {c.professional?.retrieved_at && (
           <p className="muted small">

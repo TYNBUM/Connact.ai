@@ -8,7 +8,7 @@ from app.db import Session, WorkspaceRepository
 from app.models import Contact, PeopleJob, Workspace, now
 from app.providers.apify import normalize_profile
 from app.providers.base import _calls
-from app.services.people_jobs import process_job, recover_jobs
+from app.services.people_jobs import process_job, recover_jobs, stop_people_worker
 
 URL = "https://www.linkedin.com/in/jane-doe"
 
@@ -45,6 +45,7 @@ def profile():
 
 @pytest.fixture
 def live(monkeypatch):
+    stop_people_worker()
     _calls.clear()
     monkeypatch.setattr(settings, "people_mode", "live")
     monkeypatch.setattr(settings, "apify_api_key", "test-only")
@@ -153,9 +154,28 @@ def test_async_search_history_and_workspace_scope(client, live):
         "job"
     ]
     process_job(r["id"])
+    preparing = client.get("/api/people/jobs/" + r["id"]).json()
+    assert preparing["status"] == "waiting"
+    assert preparing["result"]["profile_progress"]["pending"] == 1
+    assert "items" not in preparing["result"]
+    child_id = next(iter(preparing["result"]["profiles"].values()))["job_id"]
+    process_job(child_id)
+    process_job(child_id)
+    process_job(r["id"])
     done = client.get("/api/people/jobs/" + r["id"]).json()
     assert done["status"] == "succeeded"
-    assert done["result"]["items"][0]["company"] == ""
+    contact = done["result"]["items"][0]
+    assert contact["company"] == "Actual Firm"
+    assert contact["professional"]["education"][0]["degree"] == "BA"
+    assert contact["profile_prefetch"]["status"] == "succeeded"
+    assert contact["email"] == "" and contact["email_status"] == "not_requested"
+    assert all(r.url.host != "api.apollo.io" for r in live[0])
+    for request in live[0]:
+        if request.method == "POST":
+            assert (
+                json.loads(request.content)["profileScraperMode"]
+                == "Profile details no email ($4 per 1k)"
+            )
     assert client.get("/api/finance/search/jobs").json()[0]["id"] == r["id"]
     assert client.post(
         "/api/finance/search/jobs", json={"company": "Filter Firm"}
@@ -179,6 +199,251 @@ def test_profile_identity_conflict_keeps_original(client, live):
     done = client.get("/api/people/jobs/" + job["id"]).json()
     assert done["status"] == "failed"
     assert client.get("/api/contacts/" + c["id"]).json()["professional"] == {}
+
+
+def search_page(client, **filters):
+    job = client.post("/api/finance/search/jobs", json=filters).json()["job"]
+    process_job(job["id"])
+    return client.get("/api/people/jobs/" + job["id"]).json()
+
+
+def test_page_reuses_profile_cache_across_searches_and_gets_never_submit(client, live):
+    first = search_page(client, company="First filter")
+    child_id = next(iter(first["result"]["profiles"].values()))["job_id"]
+    process_job(child_id)
+    process_job(child_id)
+    process_job(first["id"])
+    second = search_page(client, company="Different filter")
+    assert second["status"] == "succeeded"
+    c = second["result"]["items"][0]
+    assert c["profile_prefetch"]["cached"] and c["professional"]["experience"]
+    requests_before = len(live[0])
+    for _ in range(3):
+        assert client.get("/api/contacts/" + c["id"]).status_code == 200
+        assert client.get("/api/people/jobs/" + second["id"]).status_code == 200
+    assert len(live[0]) == requests_before
+    assert len([r for r in live[0] if r.method == "POST"]) == 1
+
+
+@pytest.mark.parametrize("has_profile", [False, True])
+def test_old_search_history_reports_current_profile_or_search_again_without_fetching(
+    client, live, has_profile
+):
+    page = search_page(client, company="Old saved filter")
+    child = next(iter(page["result"]["profiles"].values()))["job_id"]
+    if has_profile:
+        process_job(child)
+        process_job(child)
+    with Session() as db:
+        job = db.get(PeopleJob, page["id"])
+        job.status = "succeeded"
+        job.result = {
+            k: v
+            for k, v in job.result.items()
+            if k not in ("profiles", "phase", "profile_progress")
+        }
+        db.commit()
+    before = len(live[0])
+    result = client.get("/api/people/jobs/" + page["id"]).json()
+    state = result["result"]["items"][0]["profile_prefetch"]
+    assert state["status"] == ("succeeded" if has_profile else "failed")
+    if not has_profile:
+        assert "Search again" in state["error"]
+    assert len(live[0]) == before
+
+
+@pytest.mark.parametrize("remove_snapshot", [False, True])
+def test_search_cache_rejects_edited_or_missing_professional_snapshot(
+    client, live, remove_snapshot
+):
+    from app.models import ContactDomainProfile
+
+    first = search_page(client, company="Same filter")
+    contact_id = first["result"]["contact_ids"][0]
+    child_id = first["result"]["profiles"][contact_id]["job_id"]
+    process_job(child_id)
+    process_job(child_id)
+    process_job(first["id"])
+    if remove_snapshot:
+        with Session() as db:
+            repo = WorkspaceRepository(db, settings.workspace_id)
+            for profile in repo.all(
+                ContactDomainProfile,
+                ContactDomainProfile.contact_id == contact_id,
+                ContactDomainProfile.domain == "professional",
+            ):
+                db.delete(profile)
+            db.commit()
+    else:
+        edited = client.put(
+            "/api/contacts/" + contact_id,
+            json={
+                "name": "Updated Person",
+                "company": "User edited company",
+                "profile_url": "https://www.linkedin.com/in/updated-person",
+            },
+        )
+        assert edited.status_code == 200
+    requests_before = len(live[0])
+    old = client.get("/api/people/jobs/" + first["id"]).json()
+    assert old["result"]["items"][0]["profile_prefetch"]["status"] == "failed"
+    assert old["result"]["profile_progress"]["ready"] == 0
+    assert len(live[0]) == requests_before
+    new = client.post(
+        "/api/finance/search/jobs", json={"company": "Same filter"}
+    ).json()
+    assert not new["cached"] and new["job"]["id"] != first["id"]
+    process_job(new["job"]["id"])
+    preparing = client.get("/api/people/jobs/" + new["job"]["id"]).json()
+    assert preparing["status"] == "waiting"
+    assert preparing["result"]["profiles"][contact_id]["job_id"] != child_id
+    if not remove_snapshot:
+        current = client.get("/api/contacts/" + contact_id).json()
+        assert current["company"] == "User edited company"
+        assert current["name"] == "Updated Person"
+
+
+def test_profile_failure_finishes_page_and_is_not_resubmitted_by_next_search(
+    client, live
+):
+    live[2]["status"] = "FAILED"
+    first = search_page(client, company="First filter")
+    child_id = next(iter(first["result"]["profiles"].values()))["job_id"]
+    process_job(child_id)
+    process_job(child_id)
+    process_job(first["id"])
+    done = client.get("/api/people/jobs/" + first["id"]).json()
+    assert done["status"] == "succeeded"
+    assert done["result"]["profile_progress"] == {
+        "total": 1,
+        "ready": 0,
+        "pending": 0,
+        "failed": 1,
+        "skipped": 0,
+    }
+    c = done["result"]["items"][0]
+    assert c["professional"] == {} and "FAILED" in c["profile_prefetch"]["error"]
+    second = search_page(client, company="Different filter")
+    assert second["status"] == "succeeded"
+    assert second["result"]["items"][0]["profile_prefetch"]["job_id"] == child_id
+    assert len([r for r in live[0] if r.method == "POST"]) == 1
+
+
+def test_missing_profile_configuration_keeps_discovery_results(
+    client, live, monkeypatch
+):
+    monkeypatch.setattr(settings, "apify_api_key", "")
+    result = search_page(client, company="First filter")
+    assert result["status"] == "succeeded"
+    c = result["result"]["items"][0]
+    assert c["name"] == "Jane Doe" and c["profile_prefetch"]["status"] == "failed"
+    assert "not configured" in c["profile_prefetch"]["error"]
+    assert all(r.url.host == "serpapi.com" for r in live[0])
+
+
+def test_restart_during_page_preparation_reuses_discovery_and_profile_jobs(
+    client, live
+):
+    page = search_page(client, company="Restart filter")
+    child_id = next(iter(page["result"]["profiles"].values()))["job_id"]
+    process_job(child_id)
+    with Session() as db:
+        parent = db.get(PeopleJob, page["id"])
+        parent.status = "running"
+        # Simulate a restart after enqueue's commit but before the parent stored its child ID.
+        parent.result = {**parent.result, "profiles": {}}
+        db.get(PeopleJob, child_id).status = "running"
+        db.commit()
+    recover_jobs()
+    process_job(page["id"])
+    process_job(child_id)
+    process_job(page["id"])
+    done = client.get("/api/people/jobs/" + page["id"]).json()
+    assert (
+        done["status"] == "succeeded"
+        and done["result"]["profile_progress"]["ready"] == 1
+    )
+    assert len([r for r in live[0] if r.url.host == "serpapi.com"]) == 1
+    assert len([r for r in live[0] if r.method == "POST"]) == 1
+
+
+def test_automatic_profiles_limit_inflight_runs_and_retrieve_only_current_page(
+    client, live, monkeypatch
+):
+    import app.services.people_jobs as service
+    from app.providers.apify import ApifyProfileProvider
+
+    contacts = [new_contact(client)]
+    for n in range(1, 4):
+        contacts.append(
+            client.post(
+                "/api/contacts",
+                json={
+                    "name": f"Person {n}",
+                    "profile_url": f"https://www.linkedin.com/in/person-{n}",
+                },
+            ).json()
+        )
+    starts = []
+
+    def launch(self, url, find_email=False):
+        assert not find_email
+        starts.append(url)
+        return {"run_id": "run-" + str(len(starts)), "dataset_id": "dataset"}
+
+    monkeypatch.setattr(ApifyProfileProvider, "start", launch)
+    with Session() as db:
+        repo = WorkspaceRepository(db, settings.workspace_id)
+        jobs = [
+            service.enqueue(
+                repo, "profile", {"automatic": True}, repo.get(Contact, c["id"])
+            )[0].id
+            for c in contacts
+        ]
+    for id in jobs:
+        process_job(id)
+    assert len(starts) == 2
+    assert client.get("/api/people/jobs/" + jobs[2]).json()["status"] == "queued"
+    with Session() as db:
+        db.get(PeopleJob, jobs[0]).status = "succeeded"
+        db.commit()
+    process_job(jobs[2])
+    assert len(starts) == 3
+    # Search page two creates no requests for subsequent pages.
+    monkeypatch.setattr(settings, "apify_api_key", "")
+    page = search_page(client, company="Page filter", page=2, per_page=1)
+    assert page["result"]["page"] == 2 and len(page["result"]["items"]) == 1
+    searches = [r for r in live[0] if r.url.host == "serpapi.com"]
+    assert len(searches) == 1 and searches[0].url.params["start"] == "1"
+
+
+def test_local_provider_limit_defers_submission_and_reads_without_false_uncertainty(
+    client, live, monkeypatch
+):
+    monkeypatch.setattr(settings, "provider_calls_per_minute", 1)
+    first = start(client, new_contact(client))
+    process_job(first["id"])
+    other = client.post(
+        "/api/contacts",
+        json={"name": "Other", "profile_url": "https://www.linkedin.com/in/other"},
+    ).json()
+    second = start(client, other)
+    process_job(second["id"])
+    deferred = client.get("/api/people/jobs/" + second["id"]).json()
+    assert deferred["status"] == "waiting" and deferred["retryable"]
+    assert deferred["upstream"] == {} and "uncertain" not in deferred["error"]
+    assert len([r for r in live[0] if r.method == "POST"]) == 1
+    # A run already submitted waits for local read capacity without consuming
+    # transient provider-failure retries or forgetting the paid run ID.
+    for _ in range(5):
+        process_job(first["id"])
+    waiting = client.get("/api/people/jobs/" + first["id"]).json()
+    assert waiting["status"] == "waiting" and waiting["upstream"]["run_id"] == "run-1"
+    assert not waiting["upstream"].get("read_failures")
+    _calls.clear()
+    monkeypatch.setattr(settings, "provider_calls_per_minute", 20)
+    process_job(first["id"])
+    assert client.get("/api/people/jobs/" + first["id"]).json()["status"] == "succeeded"
 
 
 def test_manual_identity_edit_invalidates_running_profile(client, live):
@@ -337,9 +602,10 @@ def test_invite_people_jobs_and_sources_are_workspace_isolated(
         "/api/finance/search/jobs", json={"company": "Same Firm"}
     ).json()["job"]
     process_job(search_a["id"])
-    contact_a = client.get("/api/people/jobs/" + search_a["id"]).json()["result"][
-        "items"
+    contact_id_a = client.get("/api/people/jobs/" + search_a["id"]).json()["result"][
+        "contact_ids"
     ][0]
+    contact_a = client.get("/api/contacts/" + contact_id_a).json()
     profile_a = start(client, contact_a)
     client.post("/api/auth/logout")
     b = join("people-b@example.test")
@@ -367,11 +633,13 @@ def test_invite_people_jobs_and_sources_are_workspace_isolated(
         "/api/finance/search/jobs", json={"company": "Same Firm"}
     ).json()["job"]
     process_job(search_b["id"])
-    contact_b = client.get("/api/people/jobs/" + search_b["id"]).json()["result"][
-        "items"
+    contact_id_b = client.get("/api/people/jobs/" + search_b["id"]).json()["result"][
+        "contact_ids"
     ][0]
+    contact_b = client.get("/api/contacts/" + contact_id_b).json()
     assert contact_b["id"] != contact_a["id"]
-    assert contact_b["professional"] == {} and contact_b["jobs"] == []
+    assert contact_b["professional"] == {} and len(contact_b["jobs"]) == 1
+    assert contact_b["jobs"][0]["status"] == "queued"
     assert {x["id"] for x in contact_b["sources"]}.isdisjoint(
         {x["id"] for x in contact_a["sources"]}
     )

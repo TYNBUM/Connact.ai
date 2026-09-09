@@ -82,7 +82,7 @@ class DraftInput(BaseModel):
     persona_id: str | None = None
     language: Literal["en", "zh"] = "en"
     purpose: str = Field("", max_length=4000)
-    starting_point: Literal["Networking", "Informational Interview", "Recruiting"] = (
+    starting_point: Literal["Networking", "Informational Interview", "Recruiting", "Follow-up", "Introduction"] = (
         "Networking"
     )
     tone: Literal["professional", "warm", "concise"] = "professional"
