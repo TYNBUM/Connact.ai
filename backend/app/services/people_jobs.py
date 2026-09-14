@@ -32,8 +32,8 @@ _stop = Event()
 _thread = None
 _enqueue_lock = Lock()
 _claim_lock = Lock()
-# At most two automatic profile runs are in flight on the single API process.
-PROFILE_CONCURRENCY = 2
+# At most ten automatic profile runs are in flight on the single API process.
+PROFILE_CONCURRENCY = 10
 _log = logging.getLogger(__name__)
 
 
@@ -171,7 +171,7 @@ def enqueue(repo, kind, payload, contact=None, force=False, reuse_failed=False):
         payload["contact"].pop("updated_at", None)
     payload = {**payload, "mode": settings.people_mode}
     identity = (
-        ({**payload, "pipeline_version": 2} if kind == "search" else payload)
+        ({**payload, "pipeline_version": 3} if kind == "search" else payload)
         if not contact
         else {
             "mode": settings.people_mode,

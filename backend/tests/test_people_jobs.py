@@ -374,7 +374,7 @@ def test_automatic_profiles_limit_inflight_runs_and_retrieve_only_current_page(
     from app.providers.apify import ApifyProfileProvider
 
     contacts = [new_contact(client)]
-    for n in range(1, 4):
+    for n in range(1, 12):
         contacts.append(
             client.post(
                 "/api/contacts",
@@ -402,13 +402,15 @@ def test_automatic_profiles_limit_inflight_runs_and_retrieve_only_current_page(
         ]
     for id in jobs:
         process_job(id)
-    assert len(starts) == 2
-    assert client.get("/api/people/jobs/" + jobs[2]).json()["status"] == "queued"
+    assert len(starts) == 10
+    assert client.get("/api/people/jobs/" + jobs[10]).json()["status"] == "queued"
     with Session() as db:
         db.get(PeopleJob, jobs[0]).status = "succeeded"
         db.commit()
-    process_job(jobs[2])
-    assert len(starts) == 3
+    process_job(jobs[10])
+    process_job(jobs[11])
+    assert len(starts) == 11
+    assert client.get("/api/people/jobs/" + jobs[11]).json()["status"] == "queued"
     # Search page two creates no requests for subsequent pages.
     monkeypatch.setattr(settings, "apify_api_key", "")
     page = search_page(client, company="Page filter", page=2, per_page=1)

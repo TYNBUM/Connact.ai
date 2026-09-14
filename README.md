@@ -4,7 +4,7 @@ A runnable networking and AI email-writing workspace with persistent background 
 
 Implemented: resume parsing or manually created persona → people search → evidence-based recommendations → save contact → generate and edit email → auto-save → final variable preview → copy content.
 
-Includes live SerpAPI discovery, Apify professional profiles and optional work-email lookup, multi-provider writing, independent saved personas/contacts/drafts, asynchronous suggestions, reusable email templates, connected sequence planning, and `.eml` export. Sequences support draft import, three default step templates, custom JSON templates, and progressive AI planning. Gmail OAuth, in-app sending and automatic sequence execution are not implemented.
+Includes live SerpAPI discovery, Apify professional profiles and optional work-email lookup, multi-provider writing, independent saved personas/contacts/drafts, asynchronous suggestions, reusable email templates, connected sequence planning, and `.eml` export. Gmail supports separate mailbox authorization, reviewed single-email sending and scheduling, contact-filtered Inbox, original-thread replies and manual follow-up reminders. See [Gmail setup and verification](docs/gmail-integration.md). Live Gmail use requires server configuration and mailbox-owner consent. Sequences remain planning only; automatic sequence execution is not implemented.
 
 See [September 8 delivery and validation](docs/customer-ready-2026-09-08.md), [customer trial setup](docs/customer-trial.md), and [Apollo Sequence design observations](docs/apollo-sequence-writing.md).
 
@@ -75,12 +75,14 @@ Default `AUTH_MODE=local` is a personal development workspace and must stay boun
 The seed command creates 1 fictional persona, 3 saved fictional contacts, and 2 drafts; running it again will not create new ones. Mock search includes 16 fictional people, with email addresses using the reserved `.example` domain. There are no real people, and no fabricated public-profile evidence links.
 
 1. **Personas**: Create or select a persona, upload `demo/sample-resume.pdf` / `demo/sample-resume.docx`, check fields, edit, and save; you can also fill in everything manually.
-2. **People Search**: Search by job title, company, region, keyword, or financial field. After selecting a persona, click **Recommend first 5**; you can also recommend one person individually in the details.
+2. **People Search**: Search by job title, company, region, keyword, or financial field. Use **Previous 10 / Next 10** above or below results to browse subsequent pages with the same submitted filters. After selecting a persona, click **Recommend first 5**; you can also recommend one person individually in the details.
 3. **Contact Details**: Each live search page prepares public professional details automatically before displaying its people. Click a person to read the prepared work history, education, skills and summary; unavailable details are marked. Email lookup remains a separate action. Re-saving an existing contact will prompt that it already exists.
 4. **Email Studio**: Start independently or from a contact. **Assisted** provides a structured brief and selected evidence, **Prompt** provides an editable prompt with starter prompts, and **Template** provides reusable subject/body templates with variables. Generate, shorten, or adjust the tone; review and insert suggestions explicitly. **Templates** also opens the reusable email library directly.
 5. Drafts are automatically saved to the server approximately 650 ms after stopping input; page navigation will wait for the save first. You can click **Save draft**. If the save fails, the local edit is retained and a prompt is shown, but the save success is not displayed.
 6. **Preview & copy**: Replace variables, check for missing items, and copy subject/body/entire content. Missing variables cannot be marked as Reviewed & ready. Missing email addresses do not prevent draft creation; Reviewed only indicates content review, not sending, email verification, or actual deliverability.
 7. **Sequences**: Create from AI, a step template, selected drafts, or a blank workflow. Edit connected email steps, their intervals and reply threading; apply a contact/persona, preview the complete conversation, then mark it reviewed. Save any plan as a reusable step template or upload/download its JSON. See the [sequence planning guide](docs/sequence-planning.md).
+
+**Finance guided workflow**: The **Domains → Finance** menu now connects persona preparation, person selection, email writing, review, and optional follow-up in one page. It reuses the existing editors, carries the chosen persona/contact into a saved draft, waits for edits to save before changing steps, and restores progress in the same browser tab. Review includes optional Gmail delivery through its existing confirmation flow. Follow-up can create two independent draft copies, with a default three-day interval, for editing in Sequences. All independent workspace pages remain available.
 
 The language switcher in the top right corner toggles between English / Simplified Chinese; the language of emails in the editor is independently controlled and does not change with the interface language. The interface language is stored in the browser; all business data is stored on the server side.
 
@@ -154,7 +156,7 @@ Drafts associate contacts and personas, recording persona version and optimistic
 
 Uploads are only allowed for PDF/DOCX, 8 MB, PDF with 30 pages, and extracted text with 50,000 characters; encrypted/damaged/empty-text PDFs will fail, and no OCR is performed currently. Original uploads are also stored in PostgreSQL so new uploads survive an application disk reset. Legacy files still on disk are copied into the database at startup; originals already lost cannot be recovered. Downloads require the owning workspace or an authenticated administrator and are always served as attachments. There is no public static file route.
 
-Future Gmail, Inbox, and Campaign modules can reference existing Contacts and Drafts directly. PostgreSQL stores background people tasks, writing suggestions and resume parsing results; single-process workers execute them. No email-send queue or automatic sequences exist.
+Gmail and Inbox reference existing saved Contacts and reviewed Drafts. PostgreSQL stores mailbox credentials encrypted with a separate server key, filtered mail, reviewed send snapshots, reminders, suppression records, and existing background jobs. A single API process runs the persistent workers. Send operations use an atomic database claim and application idempotency keys; uncertain provider results require human review. Automatic sequences remain unavailable.
 
 ## Verification
 

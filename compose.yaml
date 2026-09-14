@@ -32,6 +32,7 @@ services:
     build: ./frontend
     environment:
       BACKEND_URL: http://backend:8000
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://127.0.0.1:3100}
       HOSTNAME: 0.0.0.0
     ports: ["127.0.0.1:3100:3100"]
     depends_on:

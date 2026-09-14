@@ -24,7 +24,7 @@ export default function PrivacyPage() {
             account and workspace information.
           </p>
           <p className={styles.policyDate}>
-            Last updated: September 10, 2026 ·{" "}
+            Last updated: September 13, 2026 ·{" "}
             <a href="#chinese" lang="zh-CN">
               中文说明 ↓
             </a>
@@ -36,6 +36,8 @@ export default function PrivacyPage() {
           <p>
             Signing in does not give Connact.ai permission to read your Gmail
             messages, access your inbox, or send email on your behalf.
+            Connecting a Gmail mailbox is a separate, optional authorization in
+            Mailboxes.
           </p>
         </div>
 
@@ -99,6 +101,27 @@ export default function PrivacyPage() {
             persist Google access tokens, refresh tokens, or ID tokens. It does
             not request Gmail permissions.
           </p>
+          <p>
+            Separately connecting Gmail lets you choose sending-only access or
+            sending and receiving access. Google grants mailbox-wide
+            permissions; it cannot restrict authorization to your platform
+            contacts. Connact.ai filters message metadata by the exact email
+            addresses of contacts you have saved in the current workspace before
+            importing message bodies. Inbox and conversation access recheck that
+            saved-contact relationship, including individual messages within a
+            shared Gmail thread. The application does not expose unrelated
+            senders&apos; messages as part of an allowed conversation.
+          </p>
+          <p>
+            For a connected Gmail account, the service stores its email address,
+            permission scopes, encrypted access and refresh tokens, sync status,
+            and imported contact messages with sender, recipients, subject,
+            body, attachment metadata and Gmail identifiers. It also stores
+            reviewed outgoing messages, schedules, delivery results,
+            conversation notes, follow-up tasks and do-not-contact choices.
+            Incoming attachment contents are retrieved when you explicitly
+            request a download.
+          </p>
         </section>
 
         <section>
@@ -126,6 +149,25 @@ export default function PrivacyPage() {
             and privacy policies. Available providers depend on the deployment
             configuration and your selected action or model. Avoid including
             information you do not want processed by those services.
+          </p>
+        </section>
+
+        <section>
+          <h2>Gmail data and AI</h2>
+          <p>
+            Gmail message bodies and attachments are not automatically sent to
+            AI providers. If you manually copy email content into an AI writing
+            prompt or draft and request AI assistance, that content is processed
+            by your selected AI provider. Incoming emails are displayed as text
+            without remote images or sender-controlled scripts. Gmail
+            information is used to provide the email features you authorize, not
+            advertising, sale of personal data or training general-purpose AI
+            models. Connact.ai&apos;s use and transfer of information received
+            from Google APIs will adhere to the{" "}
+            <a href="https://developers.google.com/terms/api-services-user-data-policy">
+              Google API Services User Data Policy
+            </a>
+            , including its Limited Use requirements.
           </p>
         </section>
 
@@ -172,12 +214,30 @@ export default function PrivacyPage() {
         </section>
 
         <section>
+          <h2>Disconnecting Gmail</h2>
+          <p>
+            In Mailboxes, disconnecting Gmail deletes its stored authorization
+            tokens and stops sending and synchronization. You may also select
+            deletion of the mailbox&apos;s imported email data from Connact.ai;
+            this does not delete messages from Gmail. Removing Google&apos;s
+            grant is a separate action in your{" "}
+            <a href="https://myaccount.google.com/connections">
+              Google Account settings
+            </a>
+            . Removing a saved contact or changing its email address removes
+            access to its previously imported messages in the platform. Ask the
+            administrator about any remaining delivery, follow-up, operational
+            or backup records.
+          </p>
+        </section>
+
+        <section>
           <h2>7. Changes to this policy</h2>
           <p>
             This page may be updated as the service changes. The date above
-            identifies the current version. Any future Gmail connection would
-            require separate permissions and an updated explanation of how that
-            information is used.
+            identifies the current version. Material changes to requested Google
+            permissions or the uses of that information will require an updated
+            explanation and any required authorization.
           </p>
         </section>
 
@@ -189,7 +249,7 @@ export default function PrivacyPage() {
             OpenID、邮箱和基本资料权限，用于确认身份。
             当前程序保存经验证的邮箱和 Google 稳定账号标识；不持久保存 Google
             姓名、头像或 access token、refresh token、ID token，不申请读取或发送
-            Gmail 邮件的权限。
+            Gmail 邮件的权限。连接 Gmail 邮箱需在邮箱页面另行授权。
             应用会保存账号所属工作区、创建及最近登录时间、管理员状态，并通过
             Cookie 维持应用会话。
           </p>
@@ -210,6 +270,21 @@ export default function PrivacyPage() {
             加载字体。这些外部服务有各自的隐私政策。
           </p>
           <p>
+            <strong>Gmail 邮件：</strong>
+            可以单独选择仅发送，或收发邮件权限。Google
+            授权覆盖整个邮箱，无法限定为平台联系人。
+            本平台根据当前工作区已保存联系人的准确邮箱地址筛选邮件元数据，匹配后才导入正文；
+            收件箱及同一会话中的每封邮件均重新检查联系人关系，不显示无关发件人的邮件。
+            平台保存已连接邮箱、授权范围、加密后的访问及刷新令牌、同步状态、联系人邮件、
+            附件元数据、发送快照、预约与投递状态、会话备注、手动跟进及停止联系设置。
+            仅在你请求下载时获取收到的附件内容。邮件以纯文字显示，不加载远程图片或脚本。
+            收到的邮件正文及附件默认不发送给
+            AI；若你主动将内容复制到草稿或指令中并请求 AI，
+            所选模型服务商会处理该内容。Google
+            数据不用于广告、出售个人数据或训练通用 AI 模型， 使用和转移遵守
+            Google API 服务用户数据政策及 Limited Use 要求。
+          </p>
+          <p>
             <strong>管理员访问：</strong>
             普通账号只能访问自己的工作区；获授权的服务管理员可以查看账号及
             工作区记录，包括个人背景、联系人、草稿、任务和上传文档，并可下载上传的文件。
@@ -220,12 +295,17 @@ export default function PrivacyPage() {
             编辑或移除单个项目不一定清除历史版本、缓存及相关任务记录；当前没有账号级一键彻底删除功能。
             如需访问、更正或删除信息，请联系 <SupportContact chinese />
             ，说明账号邮箱与请求范围；管理员可能需要核验账号归属，并说明可删除范围及基础设施中可能剩余的副本。
-            在 Google
+            在邮箱页面断开 Gmail
+            会删除平台保存的授权令牌并停止收发与同步，可同时选择删除
+            本平台已导入邮件，但不会删除 Gmail 原邮件。Google
+            账号中的授权需另行撤销。
+            移除平台联系人或更换其邮箱地址后，原导入邮件将在平台不可见。 在
+            Google
             账号中撤销连接不会自动删除本站数据，也不一定结束已有本站登录会话。
           </p>
           <p>
-            本说明于 2026 年 9 月 10 日更新。将来如接入
-            Gmail，需要另行授权并更新数据用途说明。
+            本说明于 2026 年 9 月 13 日更新。Google 登录与 Gmail
+            邮箱收发使用独立授权流程。
           </p>
         </section>
       </article>

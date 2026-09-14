@@ -130,7 +130,7 @@ def consume_state(state, browser_token):
         return record
 
 
-def verify_id_token(encoded, nonce_hash):
+def verify_id_token(encoded, nonce_hash, audience=None):
     if not isinstance(encoded, str) or not encoded or len(encoded) > 20000:
         raise GoogleOAuthError("invalid_identity")
     try:
@@ -140,7 +140,7 @@ def verify_id_token(encoded, nonce_hash):
         # Pass the RSA key, not a header-selected algorithm or a remote header URL.
         key = _keys.get_signing_key_from_jwt(encoded).key
         claims = jwt.decode(
-            encoded, key, algorithms=["RS256"], audience=settings.google_client_id.strip(),
+            encoded, key, algorithms=["RS256"], audience=audience or settings.google_client_id.strip(),
             issuer=["https://accounts.google.com", "accounts.google.com"],
             options={"require": ["iss", "aud", "exp", "iat", "sub", "nonce", "email", "email_verified"],
                      "strict_aud": True},
@@ -158,7 +158,7 @@ def verify_id_token(encoded, nonce_hash):
         or not isinstance(subject, str) or not subject or len(subject) > 255
         or not isinstance(email, str) or not 3 <= len(email) <= 250 or email.count("@") != 1
         or any(c.isspace() or ord(c) < 32 for c in email)
-        or (claims.get("azp") is not None and claims["azp"] != settings.google_client_id.strip())
+        or (claims.get("azp") is not None and claims["azp"] != (audience or settings.google_client_id.strip()))
     ):
         raise GoogleOAuthError("invalid_identity")
     return claims

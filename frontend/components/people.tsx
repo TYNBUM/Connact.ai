@@ -40,16 +40,47 @@ const sectors = [
   "Venture Capital",
   "Risk Management",
 ];
-export function PeopleSearch() {
+type PeopleFilters = {
+  title: string;
+  company: string;
+  location: string;
+  keywords: string;
+  sector: string;
+};
+const peoplePageSize = 10;
+function searchHasMore(result: PeopleJob["result"]) {
+  return (
+    result.has_more ??
+    (result.total_is_estimate
+      ? (result.items?.length || 0) === peoplePageSize
+      : (result.page || 1) * peoplePageSize < (result.total || 0))
+  );
+}
+export function PeopleSearch({
+  selectedPersonaId,
+  onSelectContact,
+  selectedContactId,
+  initialFilters,
+  initialJobId,
+  onJobChange,
+}: {
+  selectedPersonaId?: string;
+  onSelectContact?: (contact: Contact) => void;
+  selectedContactId?: string;
+  initialFilters?: Partial<PeopleFilters>;
+  initialJobId?: string;
+  onJobChange?: (id: string) => void;
+} = {}) {
   const { t, locale, personas, refresh, notify, config } = useApp();
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<PeopleFilters>({
       title: "",
       company: "",
       location: "",
       keywords: "",
       sector: "",
+      ...initialFilters,
     }),
-    [personaId, setPersonaId] = useState(personas[0]?.id || ""),
+    [localPersonaId, setPersonaId] = useState(personas[0]?.id || ""),
     [results, setResults] = useState<Contact[]>([]),
     [total, setTotal] = useState(0),
     [hasMore, setHasMore] = useState(false),
@@ -61,17 +92,35 @@ export function PeopleSearch() {
     [error, setError] = useState(""),
     [detail, setDetail] = useState<Contact | null>(null);
   const [applied, setApplied] = useState(filters);
-  const [jobId, setJobId] = useState("");
+  const personaId = selectedPersonaId ?? localPersonaId;
+  const [jobId, setJobId] = useState(initialJobId || "");
   const [history, setHistory] = useState<PeopleJob[]>([]);
   const [searchJob, setSearchJob] = useState<PeopleJob | null>(null);
   const [restoring, setRestoring] = useState(true);
+  const searchRequest = useRef(0);
+  const onJobChangeRef = useRef(onJobChange);
+  useEffect(() => {
+    onJobChangeRef.current = onJobChange;
+  }, [onJobChange]);
+  useEffect(() => {
+    if (jobId) onJobChangeRef.current?.(jobId);
+  }, [jobId]);
+  useEffect(
+    () => () => {
+      searchRequest.current += 1;
+    },
+    [],
+  );
   useEffect(() => {
     let alive = true;
     api<PeopleJob[]>("/finance/search/jobs")
       .then((jobs) => {
         if (!alive) return;
-        setHistory(jobs);
-        if (jobs[0]) setJobId(jobs[0].id);
+        setHistory((old) => [
+          ...jobs,
+          ...old.filter((job) => !jobs.some((saved) => saved.id === job.id)),
+        ]);
+        if (!initialJobId && !onSelectContact && jobs[0]) setJobId(jobs[0].id);
       })
       .catch((e) => {
         if (alive) setError(errorText(e));
@@ -93,21 +142,26 @@ export function PeopleSearch() {
         const job = await api<PeopleJob>("/people/jobs/" + jobId);
         if (!alive) return;
         setSearchJob(job);
+        setHistory((old) =>
+          old.some((saved) => saved.id === job.id)
+            ? old.map((saved) => (saved.id === job.id ? job : saved))
+            : [job, ...old],
+        );
         const submitted = Object.fromEntries(
           Object.keys(filters).map((key) => [
             key,
             String(job.input[key] || ""),
           ]),
         ) as typeof filters;
-        setApplied(submitted);
         if (first) {
           setFilters(submitted);
           first = false;
         }
         if (job.status === "succeeded") {
+          setApplied(submitted);
           setResults(job.result.items || []);
           setTotal(job.result.total || 0);
-          setHasMore(!!job.result.has_more);
+          setHasMore(searchHasMore(job.result));
           setTotalIsEstimate(!!job.result.total_is_estimate);
           setPage(job.result.page || 1);
           setSearched(true);
@@ -157,27 +211,31 @@ export function PeopleSearch() {
     }
   }
   async function search(n = 1, useFilters = filters) {
+    const request = ++searchRequest.current;
     setBusy(true);
     setError("");
+    setJobId("");
     try {
       const r = await post<{ job: PeopleJob; cached: boolean }>(
         "/finance/search/jobs",
-        { ...useFilters, page: n, per_page: 10 },
+        { ...useFilters, page: n, per_page: peoplePageSize },
       );
+      if (request !== searchRequest.current) return;
       setJobId(r.job.id);
       setSearchJob(r.job);
-      setHistory(await api<PeopleJob[]>("/finance/search/jobs"));
+      setHistory((old) => [r.job, ...old.filter((j) => j.id !== r.job.id)]);
       if (r.job.status === "succeeded") {
         setResults(r.job.result.items || []);
         setTotal(r.job.result.total || 0);
-        setHasMore(!!r.job.result.has_more);
+        setHasMore(searchHasMore(r.job.result));
         setTotalIsEstimate(!!r.job.result.total_is_estimate);
-        setPage(n);
+        setPage(r.job.result.page || n);
         setSearched(true);
         setApplied(useFilters);
         setBusy(false);
       }
     } catch (e) {
+      if (request !== searchRequest.current) return;
       setError(errorText(e));
       setBusy(false);
     }
@@ -187,6 +245,61 @@ export function PeopleSearch() {
     setDetail(contact);
     void refresh();
   };
+  const pagination = (position: string) =>
+    searched && (
+      <nav
+        className="pagination"
+        aria-label={t(
+          `Search pagination ${position}`,
+          `搜索结果翻页${position === "top" ? "上方" : "下方"}`,
+        )}
+      >
+        <span aria-live="polite">
+          {totalIsEstimate
+            ? t(
+                `${results.length} profiles on this page · up to 10 per page`,
+                `本页 ${results.length} 位人员 · 每页最多 10 位`,
+              )
+            : results.length
+              ? t(
+                  `${(page - 1) * peoplePageSize + 1}–${(page - 1) * peoplePageSize + results.length} of ${total} people`,
+                  `第 ${(page - 1) * peoplePageSize + 1}–${(page - 1) * peoplePageSize + results.length} 位，共 ${total} 位`,
+                )
+              : t("No profiles on this page", "本页没有人员")}
+          {!hasMore && !busy && ` · ${t("End of results", "已到最后一页")}`}
+        </span>
+        <div>
+          <button
+            type="button"
+            aria-label={t("Previous page", "上一页")}
+            className="button small-button"
+            disabled={page === 1 || busy}
+            onClick={() => void search(page - 1, applied)}
+          >
+            <ChevronLeft size={17} />
+            {t("Previous 10", "前 10 位")}
+          </button>
+          <span>
+            {totalIsEstimate
+              ? t(`Page ${page}`, `第 ${page} 页`)
+              : t(
+                  `Page ${page} of ${Math.max(1, Math.ceil(total / peoplePageSize))}`,
+                  `第 ${page} / ${Math.max(1, Math.ceil(total / peoplePageSize))} 页`,
+                )}
+          </span>
+          <button
+            type="button"
+            aria-label={t("Next page", "下一页")}
+            className="button small-button"
+            disabled={!hasMore || page >= 500 || busy}
+            onClick={() => void search(page + 1, applied)}
+          >
+            {t("Next 10", "后 10 位")}
+            <ChevronRight size={17} />
+          </button>
+        </div>
+      </nav>
+    );
   return (
     <>
       <Heading title={t("People Search", "人员搜索")} />
@@ -253,6 +366,7 @@ export function PeopleSearch() {
             <Field label={t("Recommend for persona", "推荐所用画像")}>
               <select
                 value={personaId}
+                disabled={selectedPersonaId !== undefined}
                 onChange={(e) => setPersonaId(e.target.value)}
               >
                 <option value="">
@@ -297,11 +411,15 @@ export function PeopleSearch() {
             <select
               aria-label="Saved searches"
               value={jobId}
+              disabled={busy}
               onChange={(e) => {
                 setError("");
                 setJobId(e.target.value);
               }}
             >
+              <option value="" disabled>
+                {t("Choose a saved search", "选择已保存搜索")}
+              </option>
               {history.map((j) => (
                 <option value={j.id} key={j.id}>
                   {String(
@@ -310,7 +428,8 @@ export function PeopleSearch() {
                       j.input.keywords ||
                       t("All people", "全部人员"),
                   )}{" "}
-                  · {new Date(j.created_at).toLocaleString()} · {j.status}
+                  · {t("Page", "第")} {String(j.input.page || 1)} ·{" "}
+                  {new Date(j.created_at).toLocaleString()} · {j.status}
                 </option>
               ))}
             </select>
@@ -381,6 +500,7 @@ export function PeopleSearch() {
           </button>
         )}
       </div>
+      {pagination("top")}
       {!personaId && (
         <div className="notice">
           <Sparkles size={15} />
@@ -412,6 +532,8 @@ export function PeopleSearch() {
           <PeopleTable
             items={results}
             personaId={personaId}
+            onSelectContact={onSelectContact}
+            selectedContactId={selectedContactId}
             onDetail={setDetail}
             onSaved={(c) =>
               setResults((old) => old.map((x) => (x.id === c.id ? c : x)))
@@ -427,37 +549,7 @@ export function PeopleSearch() {
           )}
         />
       )}
-      {searched && !busy && (
-        <div className="pagination">
-          <span>
-            {t(
-              `${results.length} profiles on this page`,
-              `本页 ${results.length} 位人员`,
-            )}
-          </span>
-          <div>
-            <button
-              aria-label="Previous page"
-              className="icon-button"
-              disabled={page === 1 || busy}
-              onClick={() => void search(page - 1, applied)}
-            >
-              <ChevronLeft size={17} />
-            </button>
-            <span>
-              {t("Page", "第")} {page}
-            </span>
-            <button
-              aria-label="Next page"
-              className="icon-button"
-              disabled={!hasMore || page >= 500 || busy}
-              onClick={() => void search(page + 1, applied)}
-            >
-              <ChevronRight size={17} />
-            </button>
-          </div>
-        </div>
-      )}
+      {pagination("bottom")}
       <div className="source-footnote">
         <Link2 size={14} />
         {t(
@@ -471,6 +563,15 @@ export function PeopleSearch() {
           contact={detail}
           personaId={personaId}
           allowProfileFetch={false}
+          selectedContactId={selectedContactId}
+          onSelectContact={
+            onSelectContact
+              ? (contact) => {
+                  onSelectContact(contact);
+                  setDetail(null);
+                }
+              : undefined
+          }
           onClose={() => setDetail(null)}
           onUpdate={update}
         />
@@ -484,11 +585,15 @@ export function PeopleTable({
   personaId,
   onDetail,
   onSaved,
+  onSelectContact,
+  selectedContactId,
 }: {
   items: Contact[];
   personaId?: string;
   onDetail: (c: Contact) => void;
   onSaved?: (c: Contact) => void;
+  onSelectContact?: (c: Contact) => void;
+  selectedContactId?: string;
 }) {
   const { t, personas, refresh, notify, go } = useApp();
   const [busy, setBusy] = useState("");
@@ -632,20 +737,38 @@ export function PeopleTable({
                         <Bookmark size={16} />
                       )}
                     </button>
-                    <button
-                      aria-label={"Write to " + c.name}
-                      title={t("Write email", "撰写邮件")}
-                      className="icon-button"
-                      onClick={() =>
-                        void go(
-                          "/email?contact=" +
-                            c.id +
-                            (personaId ? "&persona=" + personaId : ""),
-                        )
-                      }
-                    >
-                      <Mail size={16} />
-                    </button>
+                    {onSelectContact ? (
+                      <button
+                        type="button"
+                        className={`button small-button ${selectedContactId === c.id ? "primary" : ""}`}
+                        aria-pressed={selectedContactId === c.id}
+                        onClick={() => onSelectContact(c)}
+                      >
+                        {selectedContactId === c.id ? (
+                          <Check size={15} />
+                        ) : (
+                          <ArrowRight size={15} />
+                        )}
+                        {selectedContactId === c.id
+                          ? t("Selected", "已选择")
+                          : t("Use this contact", "选择此人")}
+                      </button>
+                    ) : (
+                      <button
+                        aria-label={"Write to " + c.name}
+                        title={t("Write email", "撰写邮件")}
+                        className="icon-button"
+                        onClick={() =>
+                          void go(
+                            "/email?contact=" +
+                              c.id +
+                              (personaId ? "&persona=" + personaId : ""),
+                          )
+                        }
+                      >
+                        <Mail size={16} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -785,12 +908,16 @@ export function ContactDrawer({
   onClose,
   onUpdate,
   allowProfileFetch = true,
+  onSelectContact,
+  selectedContactId,
 }: {
   contact: Contact;
   personaId?: string;
   onClose: () => void;
   onUpdate: (c: Contact) => void;
   allowProfileFetch?: boolean;
+  onSelectContact?: (c: Contact) => void;
+  selectedContactId?: string;
 }) {
   const { t, locale, personas, refresh, notify, go, config } = useApp();
   const active = useRef(true);
@@ -954,15 +1081,33 @@ export function ContactDrawer({
         </span>
       </div>
       <div className="drawer-actions">
-        <button
-          className="button primary"
-          onClick={() =>
-            void go("/email?contact=" + c.id + (pid ? "&persona=" + pid : ""))
-          }
-        >
-          <Mail size={16} />
-          {t("Write email", "撰写邮件")}
-        </button>
+        {onSelectContact ? (
+          <button
+            type="button"
+            className="button primary"
+            aria-pressed={selectedContactId === c.id}
+            onClick={() => onSelectContact(c)}
+          >
+            {selectedContactId === c.id ? (
+              <Check size={16} />
+            ) : (
+              <ArrowRight size={16} />
+            )}
+            {selectedContactId === c.id
+              ? t("Selected", "已选择")
+              : t("Use this contact", "选择此人")}
+          </button>
+        ) : (
+          <button
+            className="button primary"
+            onClick={() =>
+              void go("/email?contact=" + c.id + (pid ? "&persona=" + pid : ""))
+            }
+          >
+            <Mail size={16} />
+            {t("Write email", "撰写邮件")}
+          </button>
+        )}
         <button
           className="button"
           disabled={!!busy}
@@ -1236,6 +1381,7 @@ export function ContactDrawer({
           <select
             aria-label="Recommendation persona"
             value={pid}
+            disabled={!!onSelectContact}
             onChange={(e) => setPid(e.target.value)}
           >
             <option value="">{t("Select persona", "选择画像")}</option>

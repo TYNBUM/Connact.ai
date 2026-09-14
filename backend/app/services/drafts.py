@@ -74,7 +74,7 @@ def preview(repo, draft):
         "can_mark_ready": complete,
         "persona_changed": stale,
         "recipient_email": contact.email if contact else "",
-        "note": "Ready means content reviewed locally. This application cannot send email.",
+        "note": "Ready means content reviewed. Sending requires a connected Gmail mailbox and explicit confirmation.",
     }
 
 

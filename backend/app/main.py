@@ -14,6 +14,8 @@ from .services.documents import start_document_worker, stop_document_worker
 from .services.file_storage import preserve_legacy_files
 from .services.sequences import start_sequence_worker, stop_sequence_worker
 from .services.auth_logging import configure_auth_log_redaction
+from .routers import gmail, mail, mail_unsubscribe
+from .services.mail import start_mail_worker, stop_mail_worker
 
 configure_auth_log_redaction()
 
@@ -33,9 +35,11 @@ async def lifespan(app):
     start_people_worker()
     start_document_worker()
     start_sequence_worker()
+    start_mail_worker()
     try:
         yield
     finally:
+        stop_mail_worker()
         stop_sequence_worker()
         stop_document_worker()
         stop_people_worker()
@@ -106,3 +110,7 @@ def config(request: Request, repo=Depends(get_repo)):
 
 for router in (personas.router, contacts.router, finance.router, drafts.router, auth.router, export.router, admin.router, sequences.router, writing_templates.router):
     app.include_router(router, prefix="/api")
+
+app.include_router(gmail.router, prefix="/api")
+app.include_router(mail.router, prefix="/api")
+app.include_router(mail_unsubscribe.router, prefix="/api")

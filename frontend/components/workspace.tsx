@@ -22,10 +22,12 @@ import {
   Sun,
   ShieldCheck,
   GitBranch,
+  Clock,
 } from "lucide-react";
 import { AppProvider, useApp } from "@/lib/context";
 import { Nav } from "./ui";
-import { Dashboard, Finance, ComingSoon } from "./overview";
+import { Dashboard, ComingSoon } from "./overview";
+import FinanceFlow from "./finance-flow";
 import Personas from "./personas";
 import { PeopleSearch, Contacts } from "./people";
 import EmailStudio from "./email-studio";
@@ -33,6 +35,7 @@ import AuthGate from "./auth-gate";
 import Admin from "./admin";
 import Sequences from "./sequences";
 import WritingTemplatesPage from "./writing-templates-page";
+import { Mailboxes, MailInbox, Outbox, Followups } from "./mail-center";
 import { post } from "@/lib/api";
 
 const main = [
@@ -47,6 +50,8 @@ const main = [
 const later = [
   ["/mailboxes", "Mailboxes", "邮箱", Mail],
   ["/inbox", "Inbox", "收件箱", Inbox],
+  ["/outbox", "Outbox", "发件箱", Send],
+  ["/followups", "Follow-ups", "手动跟进", Clock],
   ["/campaigns", "Campaigns", "外联活动", Send],
   ["/analytics", "Analytics", "分析", ChartNoAxesCombined],
 ] as const;
@@ -143,16 +148,13 @@ function Shell() {
             );
           })}
         </nav>
-        <div className="nav-label">
-          {t("OUTREACH", "外联管理")}
-          <span>{t("Coming soon", "即将推出")}</span>
-        </div>
+        <div className="nav-label">{t("OUTREACH", "外联管理")}</div>
         <nav>
           {later.map(([href, en, zh, Icon]) => (
             <Nav
               key={href}
               href={href}
-              className={`nav-item future ${path === href ? "active" : ""}`}
+              className={`nav-item ${["/campaigns", "/analytics"].includes(href) ? "future" : ""} ${path === href ? "active" : ""}`}
             >
               <Icon size={18} />
               <span>{t(en, zh)}</span>
@@ -286,7 +288,7 @@ function Shell() {
           ) : path === "/" ? (
             <Dashboard />
           ) : path === "/finance" ? (
-            <Finance />
+            <FinanceFlow />
           ) : path === "/personas" ? (
             <Personas />
           ) : path === "/people" ? (
@@ -299,6 +301,14 @@ function Shell() {
             <Sequences />
           ) : path === "/templates" ? (
             <WritingTemplatesPage />
+          ) : path === "/mailboxes" ? (
+            <Mailboxes />
+          ) : path === "/inbox" ? (
+            <MailInbox />
+          ) : path === "/outbox" ? (
+            <Outbox />
+          ) : path === "/followups" ? (
+            <Followups />
           ) : path === "/admin" ? (
             <Admin />
           ) : (

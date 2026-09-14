@@ -30,6 +30,8 @@ async function writingFixture(page: Page) {
         providers: {},
       });
     if (path === "/personas" || path === "/contacts") return reply([]);
+    if (path === "/mailboxes")
+      return reply({ configured: false, mailboxes: [], callback_uri: "" });
     if (path === "/writing-templates") return reply([]);
     if (path === "/ai/models")
       return reply({
@@ -210,7 +212,7 @@ test("independent brief persists and background suggestions require insertion", 
     "My existing text",
   );
   await expect(page.getByLabel("To · Contact")).toHaveValue("");
-  await expect(page.getByLabel("From · Persona")).toHaveValue("");
+  await expect(page.getByLabel("Writing context · Persona")).toHaveValue("");
   await page.getByRole("link", { name: "Contacts", exact: true }).click();
   await expect(page).toHaveURL(/\/contacts$/);
   fixture.finish(id);

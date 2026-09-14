@@ -106,8 +106,9 @@ export default function AboutPage() {
             <h3>Plan the next step with intention.</h3>
             <p>
               Organize outreach steps and follow-up drafts before taking action.
-              The current workspace prepares messages; it does not send email or
-              synchronize an inbox.
+              Connect Gmail separately to send reviewed messages, schedule
+              delivery and synchronize saved contacts&apos; replies. Sequence
+              plans and manual follow-up tasks do not send emails automatically.
             </p>
           </article>
         </div>

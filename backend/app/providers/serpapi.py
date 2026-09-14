@@ -7,6 +7,29 @@ import re
 from fastapi import HTTPException
 
 
+def has_next_page(result, page, per_page, organic_count):
+    # SerpAPI has emitted both `next` and `next_link`; Google pagination and
+    # numbered links can also identify the next page. Do not infer accessible
+    # pages from Google's approximate total_results count.
+    pagination = [
+        value
+        for key in ("serpapi_pagination", "pagination")
+        if isinstance(value := result.get(key), dict)
+    ]
+    for value in pagination:
+        if value.get("next") or value.get("next_link"):
+            return True
+        other_pages = value.get("other_pages")
+        if isinstance(other_pages, dict) and other_pages.get(str(page + 1)):
+            return True
+    if pagination:
+        return False
+    # Missing pagination metadata is not proof of the last page. A full raw
+    # page allows another explicit request; a short/empty page ends discovery.
+    # Count raw results here because URL deduplication can shrink the UI page.
+    return organic_count >= per_page
+
+
 class SerpAPIPeople:
     def search(self, filters):
         # Filters are search terms, never asserted as facts about a result.
@@ -72,7 +95,9 @@ class SerpAPIPeople:
             "people": people,
             "total": total,
             "total_is_estimate": True,
-            "has_more": bool((result.get("serpapi_pagination") or {}).get("next")),
+            "has_more": has_next_page(
+                result, filters["page"], filters["per_page"], len(organic)
+            ),
         }
 
 

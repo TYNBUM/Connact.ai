@@ -11,7 +11,10 @@ class AuthQueryRedaction(logging.Filter):
             full_path = args[2]
             if isinstance(full_path, str):
                 path = full_path.split("?", 1)[0]
-                if unquote(path).startswith("/api/auth/"):
+                if unquote(path).startswith("/api/mail/unsubscribe/"):
+                    args[2] = "/api/mail/unsubscribe/[redacted]"
+                    record.args = tuple(args)
+                elif unquote(path).startswith(("/api/auth/", "/api/mailboxes/callback")):
                     args[2] = path
                     record.args = tuple(args)
         return True

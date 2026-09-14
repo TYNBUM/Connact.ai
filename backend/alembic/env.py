@@ -5,6 +5,7 @@ from app.db import Base
 from app import models
 from app import auth_models
 from app import sequence_models, writing_template_models
+from app import mail_models
 
 
 def run():

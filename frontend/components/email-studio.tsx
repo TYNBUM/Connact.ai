@@ -32,6 +32,7 @@ import { Heading, Field, Badge, Busy, Nav, Drawer, DateLabel } from "./ui";
 import RichEditor from "./rich-editor";
 import WritingPrompt from "./writing-prompt";
 import WritingTemplateLibrary from "./writing-template-library";
+import { SendDraft } from "./mail-send";
 import "./email-writing.css";
 
 export default function EmailStudio() {
@@ -123,8 +124,8 @@ export default function EmailStudio() {
           <div className="draft-list-note">
             <Mail size={17} />
             {t(
-              "A space to write. Sending is coming in a future phase.",
-              "专注写作，邮件发送将在后续阶段提供。",
+              "Write, review, then send or schedule with your connected Gmail mailbox.",
+              "撰写并审核后，使用已连接的 Gmail 邮箱发送或预约发送。",
             )}
           </div>
         </aside>
@@ -167,11 +168,21 @@ export function DraftEditor({
   replySubject,
   loadPreview,
   disabled = false,
+  replyMessageId,
+  mailboxId,
+  onSent,
+  contextLocked = false,
+  hideDelivery = false,
 }: {
   id: string;
   replySubject?: string;
   loadPreview?: () => Promise<Preview>;
   disabled?: boolean;
+  replyMessageId?: string;
+  mailboxId?: string;
+  onSent?: () => void;
+  contextLocked?: boolean;
+  hideDelivery?: boolean;
 }) {
   const { t, personas, contacts, refresh, notify, config } = useApp();
   const {
@@ -562,6 +573,7 @@ export function DraftEditor({
             <Field label={t("To · Contact", "收件人 · 联系人")}>
               <select
                 value={draft.contact_id || ""}
+                disabled={!!replyMessageId || contextLocked}
                 onChange={(e) =>
                   edit({ contact_id: e.target.value || null, evidence_ids: [] })
                 }
@@ -579,9 +591,12 @@ export function DraftEditor({
                 ))}
               </select>
             </Field>
-            <Field label={t("From · Persona", "发件人 · 职业画像")}>
+            <Field
+              label={t("Writing context · Persona", "写作背景 · 职业画像")}
+            >
               <select
                 value={draft.persona_id || ""}
+                disabled={contextLocked}
                 onChange={(e) => edit({ persona_id: e.target.value || null })}
               >
                 <option value="">
@@ -1085,8 +1100,12 @@ export function DraftEditor({
         {replySubject !== undefined && (
           <p className="email-reply-subject-note">
             {t(
-              "Reply step: the subject follows the earlier email in this thread. Change it on the step that starts this thread.",
-              "回复步骤的主题继承此会话中的上一封邮件，请在开启此会话的步骤中修改。",
+              replyMessageId
+                ? "The reply keeps the original Gmail conversation's subject and saved contact as its recipient."
+                : "Reply step: the subject follows the earlier email in this thread. Change it on the step that starts this thread.",
+              replyMessageId
+                ? "回复保留原 Gmail 会话的主题，收件人仅为原已保存联系人。"
+                : "回复步骤的主题继承此会话中的上一封邮件，请在开启此会话的步骤中修改。",
             )}
           </p>
         )}
@@ -1165,6 +1184,18 @@ export function DraftEditor({
           </div>
         </div>
       </div>
+      {!hideDelivery &&
+        ((!loadPreview && replySubject === undefined) || !!replyMessageId) && (
+          <SendDraft
+            draft={draft}
+            flush={flush}
+            accept={accept}
+            disabled={busy}
+            replyMessageId={replyMessageId}
+            mailboxId={mailboxId}
+            onSent={onSent}
+          />
+        )}
       <div className="studio-footnote">
         <Check size={14} />
         {t(

@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     auth_provider: Literal["password", "google"] = "password"
     google_client_id: str = ""
     google_client_secret: str = ""
+    # Separate mailbox consent; optionally reuse the sign-in OAuth client.
+    gmail_client_id: str = ""
+    gmail_client_secret: str = ""
+    gmail_token_encryption_keys: str = ""
+    gmail_worker_enabled: bool = True
+    gmail_sync_interval_seconds: int = Field(default=120, ge=30, le=3600)
+    gmail_daily_send_limit: int = Field(default=100, ge=1, le=2000)
     bootstrap_admin_password_hash: str = ""
     public_origin: str = "http://127.0.0.1:3100"
     allowed_hosts: str = "localhost,127.0.0.1,backend,testserver"

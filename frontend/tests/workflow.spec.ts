@@ -213,19 +213,25 @@ test("resume upload, rich text, independent writing language and future routes",
   await expect(
     page.getByRole("region", { name: "Email template library" }),
   ).toBeVisible();
-  for (const route of [
-    "mailboxes",
-    "inbox",
-    "campaigns",
-    "analytics",
-    "settings",
-  ]) {
+  for (const route of ["campaigns", "analytics", "settings"]) {
     await page.goto("/" + route);
     await expect(page.getByText("Coming Soon", { exact: true })).toBeVisible();
   }
+  for (const [route, title] of [
+    ["mailboxes", "Mailboxes"],
+    ["inbox", "Inbox"],
+    ["outbox", "Outbox"],
+    ["followups", "Follow-ups"],
+  ]) {
+    await page.goto("/" + route);
+    await expect(
+      page.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Coming Soon", { exact: true })).toHaveCount(0);
+  }
   await page.goto("/settings/integrations");
   await expect(
-    page.getByText("Not connected. Available in a future phase."),
+    page.getByRole("link", { name: "Manage Gmail", exact: true }),
   ).toBeVisible();
 });
 

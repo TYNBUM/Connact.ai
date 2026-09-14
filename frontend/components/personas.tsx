@@ -74,11 +74,21 @@ type ResumeJob = {
   extracted_text: string;
   error: string | null;
 };
-export default function Personas() {
+export default function Personas({
+  initialPersonaId,
+  onSaved,
+}: {
+  initialPersonaId?: string;
+  onSaved?: (persona: Persona) => void;
+} = {}) {
   const { t, personas, refresh, notify, config } = useApp();
-  const [selected, setSelected] = useState<Persona | null>(personas[0] || null),
-    [data, setData] = useState<PersonaData>(personas[0]?.data || blank),
-    [label, setLabel] = useState(personas[0]?.label || ""),
+  const initial =
+    initialPersonaId === undefined
+      ? personas[0]
+      : personas.find((p) => p.id === initialPersonaId);
+  const [selected, setSelected] = useState<Persona | null>(initial || null),
+    [data, setData] = useState<PersonaData>(initial?.data || blank),
+    [label, setLabel] = useState(initial?.label || ""),
     [documentId, setDocumentId] = useState<string | null>(null),
     [raw, setRaw] = useState(""),
     [uploading, setUploading] = useState(false),
@@ -88,12 +98,18 @@ export default function Personas() {
     [parsed, setParsed] = useState<ResumeJob | null>(null),
     [documents, setDocuments] = useState<ResumeJob[]>([]),
     [hydrated, setHydrated] = useState(false);
-  const storageKey = `connact-persona-editor:${config?.workspace_id || "local-personal"}`;
+  const storageKey = `connact-persona-editor:${config?.workspace_id || "local-personal"}${onSaved ? ":finance:" + (initialPersonaId || "new") : ""}`;
   const viewId = useRef(0);
   useEffect(() => {
     try {
       const cached = JSON.parse(sessionStorage.getItem(storageKey) || "null");
-      if (cached) {
+      const recover =
+        !onSaved ||
+        ((cached?.dirty || cached?.uploading || cached?.parsed) &&
+          (initialPersonaId
+            ? cached?.selected?.id === initialPersonaId
+            : !cached?.selected));
+      if (cached && recover) {
         setSelected(cached.selected);
         setData(cached.data);
         setLabel(cached.label);
@@ -259,6 +275,14 @@ export default function Personas() {
         setDirty(false);
       }
       await refresh();
+      if (targetView === viewId.current && onSaved) {
+        try {
+          sessionStorage.removeItem(storageKey);
+        } catch {
+          /* Optional browser buffer. */
+        }
+        onSaved(p);
+      }
       notify(
         t(
           "Persona saved. A versioned snapshot is ready for personalization.",

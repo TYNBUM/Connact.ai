@@ -40,6 +40,8 @@ https://www.googleapis.com/auth/userinfo.profile
 
 如果偏好 `localhost`，则注册 `http://localhost:3100/api/auth/google/callback`，并把项目的 `PUBLIC_ORIGIN` 改为 `http://localhost:3100`。登录入口、环境变量和回调中的域名必须一致。
 
+Docker Compose 会向前后端传入相同的 `PUBLIC_ORIGIN`。使用另一个本地域名访问同端口的页面时，会在登录前自动跳转到配置的域名，让 OAuth 状态 Cookie 和回调使用同一域名。前端若不通过 Compose 启动，也应在其环境变量中设置相同的 `PUBLIC_ORIGIN`（默认值为 `http://127.0.0.1:3100`）。API 的来源校验仍保持严格。
+
 ## 4. 保存凭据
 
 点击 **Create** 后保存 **Client ID** 和 **Client secret**，若有 **Download JSON** 就当场下载。Client ID 通常以 `.apps.googleusercontent.com` 结尾。

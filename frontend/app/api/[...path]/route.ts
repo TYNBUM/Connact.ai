@@ -52,6 +52,7 @@ async function proxy(
       "x-content-type-options",
       "location",
       "referrer-policy",
+      "content-security-policy",
     ])
       if (response.headers.get(key))
         headers.set(key, response.headers.get(key)!);
@@ -68,4 +69,10 @@ async function proxy(
     );
   }
 }
-export { proxy as GET, proxy as POST, proxy as PUT, proxy as DELETE };
+export {
+  proxy as GET,
+  proxy as POST,
+  proxy as PUT,
+  proxy as PATCH,
+  proxy as DELETE,
+};

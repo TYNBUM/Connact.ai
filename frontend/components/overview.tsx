@@ -317,14 +317,6 @@ const purposes: Record<string, [string, string]> = {
     "A future library for creating, organizing and reusing writing templates. Three Finance writing starting points are already available in Email Studio.",
     "未来支持创建、整理和复用邮件模板。邮件工作室已提供三种金融写作起点。",
   ],
-  mailboxes: [
-    "Connect an email account in a later phase. No mailbox is connected and no email can be sent in this version.",
-    "后续阶段将支持连接邮箱。当前没有连接邮箱，也不能发送邮件。",
-  ],
-  inbox: [
-    "A future place to read replies and continue your conversations.",
-    "未来将在这里查看回信并继续对话。",
-  ],
   campaigns: [
     "Organize outreach and follow-ups in a later phase, reusing your existing contacts and drafts.",
     "后续将支持管理外联和跟进，复用现有联系人与草稿。",
@@ -413,12 +405,12 @@ export function ComingSoon({ path, title }: { path: string; title: string }) {
               <h3>Gmail</h3>
               <p>
                 {t(
-                  "Not connected. Available in a future phase.",
-                  "尚未连接，将在后续阶段开放。",
+                  "Connect a Gmail mailbox to send email and sync saved platform contacts' replies. Google sign-in is separate.",
+                  "连接 Gmail 以发送邮件并同步已保存平台联系人的回复。Google 登录与邮箱授权相互独立。",
                 )}
               </p>
             </div>
-            <Badge>Coming Soon</Badge>
+            <Nav href="/mailboxes">{t("Manage Gmail", "管理 Gmail")}</Nav>
           </div>
         </div>
       </>
