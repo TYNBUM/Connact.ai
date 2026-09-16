@@ -142,8 +142,14 @@ test("persona → search → source-based recommendation → contact → edited,
   ).toBeDisabled();
   await page.getByRole("button", { name: "Close details" }).click();
   await page.goto("/academic");
-  await expect(page.getByText("Coming Soon", { exact: true })).toBeVisible();
-  await expect(page.getByRole("main").getByRole("button")).toHaveCount(0);
+  const academicFlow = page.getByTestId("academic-flow");
+  await expect(academicFlow).toHaveAttribute("data-step", "0");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Academic workflow steps" })
+      .getByRole("button"),
+  ).toHaveCount(5);
+  await expect(page.getByText("Coming Soon", { exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 

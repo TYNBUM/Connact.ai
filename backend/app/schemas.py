@@ -16,6 +16,7 @@ class PersonaData(BaseModel):
 
 
 class PersonaInput(BaseModel):
+    domain: Literal["finance", "academic"] = "finance"
     label: str = Field(min_length=1, max_length=150)
     data: PersonaData
     document_id: str | None = None
@@ -23,6 +24,7 @@ class PersonaInput(BaseModel):
 
 
 class ContactInput(BaseModel):
+    domain: Literal["finance", "academic"] = "finance"
     name: str = Field(min_length=1, max_length=200)
     title: str = Field("", max_length=250)
     company: str = Field("", max_length=250)
@@ -51,6 +53,7 @@ class ContactInput(BaseModel):
 
 class ContactJobInput(BaseModel):
     kind: Literal["profile", "email", "email_apify"]
+    domain: Literal["finance", "academic"] = "finance"
     force: bool = False
 
 
@@ -71,6 +74,16 @@ class SearchInput(BaseModel):
     per_page: int = Field(10, ge=1, le=10)
 
 
+class AcademicSearchInput(BaseModel):
+    title: str = Field("", max_length=200)
+    company: str = Field("", max_length=200)
+    location: str = Field("", max_length=200)
+    keywords: str = Field("", max_length=300)
+    sector: str = Field("", max_length=300)
+    page: int = Field(1, ge=1, le=500)
+    per_page: int = Field(10, ge=1, le=10)
+
+
 class AssessmentInput(BaseModel):
     contact_ids: list[str] = Field(min_length=1, max_length=5)
     persona_id: str
@@ -78,11 +91,24 @@ class AssessmentInput(BaseModel):
 
 
 class DraftInput(BaseModel):
+    domain: Literal["finance", "academic"] = "finance"
     contact_id: str | None = None
     persona_id: str | None = None
     language: Literal["en", "zh"] = "en"
     purpose: str = Field("", max_length=4000)
-    starting_point: Literal["Networking", "Informational Interview", "Recruiting", "Follow-up", "Introduction"] = (
+    starting_point: Literal[
+        "Networking",
+        "Informational Interview",
+        "Recruiting",
+        "Follow-up",
+        "Introduction",
+        "PhD Inquiry",
+        "Research Masters Inquiry",
+        "Research Internship",
+        "Research Assistant",
+        "Postdoc Inquiry",
+        "Academic Collaboration",
+    ] = (
         "Networking"
     )
     tone: Literal["professional", "warm", "concise"] = "professional"

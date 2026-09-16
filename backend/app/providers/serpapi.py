@@ -7,6 +7,37 @@ import re
 from fastapi import HTTPException
 
 
+def normalize_serpapi_response(data: dict) -> dict:
+    """Accept SerpAPI's successful empty-result response, reject real errors."""
+    if not isinstance(data, dict):
+        raise HTTPException(502, "SerpAPI returned invalid search data.")
+    organic = data.get("organic_results", [])
+    if not isinstance(organic, list):
+        raise HTTPException(502, "SerpAPI returned invalid search results.")
+    if data.get("error"):
+        metadata = data.get("search_metadata")
+        status = metadata.get("status") if isinstance(metadata, dict) else None
+        if status != "Success" or organic:
+            raise HTTPException(
+                502,
+                "SerpAPI could not complete this search. Retry later or check the provider dashboard. No mock fallback was used.",
+            )
+    return {**data, "organic_results": organic}
+
+
+def serpapi_search(params: dict) -> dict:
+    return normalize_serpapi_response(
+        request_json(
+            "SerpAPI",
+            "GET",
+            "https://serpapi.com/search.json",
+            settings.serpapi_api_key,
+            allow_provider_error=True,
+            params={"api_key": settings.serpapi_api_key, **params},
+        )
+    )
+
+
 def has_next_page(result, page, per_page, organic_count):
     # SerpAPI has emitted both `next` and `next_link`; Google pagination and
     # numbered links can also identify the next page. Do not infer accessible
@@ -31,30 +62,32 @@ def has_next_page(result, page, per_page, organic_count):
 
 
 class SerpAPIPeople:
+    def __init__(self, domain="finance"):
+        self.domain = domain
+
     def search(self, filters):
         # Filters are search terms, never asserted as facts about a result.
+        title = filters.get("title", "").strip()
+        if self.domain == "academic" and not title:
+            title = "Professor"
         terms = [
-            filters.get(k, "").strip()
-            for k in ("title", "company", "location", "sector", "keywords")
+            title,
+            *[
+                filters.get(k, "").strip()
+                for k in ("company", "location", "sector", "keywords")
+            ],
         ]
         query = "site:linkedin.com/in/ " + " ".join(x for x in terms if x)
         start = (filters["page"] - 1) * filters["per_page"]
-        result = request_json(
-            "SerpAPI",
-            "GET",
-            "https://serpapi.com/search.json",
-            settings.serpapi_api_key,
-            params={
-                "api_key": settings.serpapi_api_key,
+        result = serpapi_search(
+            {
                 "engine": "google",
                 "q": query.strip(),
                 "start": start,
                 "num": filters["per_page"],
-            },
+            }
         )
         organic = result.get("organic_results", [])
-        if not isinstance(organic, list):
-            raise HTTPException(502, "SerpAPI returned invalid search results.")
         people, seen = [], set()
         for hit in organic[: filters["per_page"]]:
             if not isinstance(hit, dict):
@@ -103,18 +136,14 @@ class SerpAPIPeople:
 
 class SerpAPIProvider:
     def search(self, contact):
-        result = request_json(
-            "SerpAPI",
-            "GET",
-            "https://serpapi.com/search.json",
-            settings.serpapi_api_key,
-            params={
-                "api_key": settings.serpapi_api_key,
+        result = serpapi_search(
+            {
                 "engine": "google",
                 "q": f'"{contact["name"]}" "{contact["company"]}" {contact["title"]}',
                 "num": 3,
-            },
+            }
         )
+        organic = result["organic_results"]
         return [
             {
                 "provider": "serpapi",
@@ -123,5 +152,6 @@ class SerpAPIProvider:
                 "snippet": r.get("snippet") or "",
                 "kind": "unverified_lead",
             }
-            for r in result.get("organic_results", [])[:3]
+            for r in organic[:3]
+            if isinstance(r, dict)
         ]

@@ -24,6 +24,7 @@ def validate_order(steps):
 class SequenceCreate(StrictInput):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field("", max_length=4000)
+    domain: Literal["finance", "academic"] | None = None
     language: Literal["en", "zh"] = "en"
     contact_id: str | None = None
     persona_id: str | None = None

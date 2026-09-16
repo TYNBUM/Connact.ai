@@ -1,3 +1,5 @@
+export type OutreachDomain = "finance" | "academic";
+
 export type PersonaData = {
   name: string;
   education: string;
@@ -12,6 +14,7 @@ export type PersonaData = {
 export type Persona = {
   id: string;
   label: string;
+  domain?: OutreachDomain;
   version: number;
   data: PersonaData;
   updated_at: string;
@@ -37,6 +40,7 @@ export type Assessment = {
 };
 export type PeopleJob = {
   id: string;
+  domain?: OutreachDomain;
   kind: "search" | "profile" | "email" | "email_apify";
   status: "queued" | "running" | "waiting" | "succeeded" | "failed";
   error: string;
@@ -118,6 +122,7 @@ export type Contact = {
 };
 export type Draft = {
   id: string;
+  domain?: OutreachDomain;
   contact_id: string | null;
   persona_id: string | null;
   persona_version: number | null;

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Search,
@@ -20,7 +20,13 @@ import {
 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { api, post, put, errorText } from "@/lib/api";
-import type { Contact, Assessment, Draft, PeopleJob } from "@/lib/types";
+import type {
+  Contact,
+  Assessment,
+  Draft,
+  OutreachDomain,
+  PeopleJob,
+} from "@/lib/types";
 import {
   Heading,
   Field,
@@ -40,6 +46,18 @@ const sectors = [
   "Venture Capital",
   "Risk Management",
 ];
+const academicSectors = [
+  "Artificial Intelligence",
+  "Computer Systems",
+  "Human-Computer Interaction",
+  "Computational Biology",
+  "Data Science",
+];
+function contactDomain(contact: Contact): OutreachDomain {
+  return contact.domains.academic && !contact.domains.finance
+    ? "academic"
+    : "finance";
+}
 type PeopleFilters = {
   title: string;
   company: string;
@@ -63,6 +81,7 @@ export function PeopleSearch({
   initialFilters,
   initialJobId,
   onJobChange,
+  domain: controlledDomain,
 }: {
   selectedPersonaId?: string;
   onSelectContact?: (contact: Contact) => void;
@@ -70,8 +89,16 @@ export function PeopleSearch({
   initialFilters?: Partial<PeopleFilters>;
   initialJobId?: string;
   onJobChange?: (id: string) => void;
+  domain?: OutreachDomain;
 } = {}) {
   const { t, locale, personas, refresh, notify, config } = useApp();
+  const [localDomain, setLocalDomain] = useState<OutreachDomain>("finance");
+  const domain = controlledDomain ?? localDomain;
+  const domainPersonas = useMemo(
+    () =>
+      personas.filter((persona) => (persona.domain || "finance") === domain),
+    [personas, domain],
+  );
   const [filters, setFilters] = useState<PeopleFilters>({
       title: "",
       company: "",
@@ -80,7 +107,7 @@ export function PeopleSearch({
       sector: "",
       ...initialFilters,
     }),
-    [localPersonaId, setPersonaId] = useState(personas[0]?.id || ""),
+    [localPersonaId, setPersonaId] = useState(domainPersonas[0]?.id || ""),
     [results, setResults] = useState<Contact[]>([]),
     [total, setTotal] = useState(0),
     [hasMore, setHasMore] = useState(false),
@@ -112,8 +139,39 @@ export function PeopleSearch({
     [],
   );
   useEffect(() => {
+    if (
+      selectedPersonaId === undefined &&
+      !domainPersonas.some((persona) => persona.id === localPersonaId)
+    )
+      setPersonaId(domainPersonas[0]?.id || "");
+  }, [domain, personas, selectedPersonaId, localPersonaId, domainPersonas]);
+  useEffect(() => {
     let alive = true;
-    api<PeopleJob[]>("/finance/search/jobs")
+    const resetFilters = {
+      title: "",
+      company: "",
+      location: "",
+      keywords: "",
+      sector: "",
+      ...initialFilters,
+    };
+    searchRequest.current += 1;
+    setFilters(resetFilters);
+    setApplied(resetFilters);
+    setResults([]);
+    setTotal(0);
+    setHasMore(false);
+    setTotalIsEstimate(false);
+    setPage(1);
+    setSearched(false);
+    setBusy(false);
+    setError("");
+    setDetail(null);
+    setHistory([]);
+    setSearchJob(null);
+    setJobId(initialJobId || "");
+    setRestoring(true);
+    api<PeopleJob[]>(`/${domain}/search/jobs`)
       .then((jobs) => {
         if (!alive) return;
         setHistory((old) => [
@@ -131,7 +189,7 @@ export function PeopleSearch({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [domain]);
   useEffect(() => {
     if (!jobId) return;
     let alive = true;
@@ -141,6 +199,18 @@ export function PeopleSearch({
       try {
         const job = await api<PeopleJob>("/people/jobs/" + jobId);
         if (!alive) return;
+        if ((job.domain || "finance") !== domain || job.kind !== "search") {
+          setJobId("");
+          setBusy(false);
+          setError(
+            t(
+              "This saved search belongs to another domain. Start a new search here.",
+              "该搜索记录属于其他业务领域，请在当前领域重新搜索。",
+            ),
+          );
+          onJobChangeRef.current?.("");
+          return;
+        }
         setSearchJob(job);
         setHistory((old) =>
           old.some((saved) => saved.id === job.id)
@@ -185,12 +255,12 @@ export function PeopleSearch({
       alive = false;
       clearTimeout(timer);
     };
-  }, [jobId]);
+  }, [jobId, domain, locale]);
   async function recommend(rows = results) {
     if (!personaId || !rows.length) return;
     setRecommending(true);
     try {
-      const assessments = await post<Assessment[]>("/finance/assess", {
+      const assessments = await post<Assessment[]>(`/${domain}/assess`, {
         contact_ids: rows.slice(0, 5).map((c) => c.id),
         persona_id: personaId,
         language: locale,
@@ -217,7 +287,7 @@ export function PeopleSearch({
     setJobId("");
     try {
       const r = await post<{ job: PeopleJob; cached: boolean }>(
-        "/finance/search/jobs",
+        `/${domain}/search/jobs`,
         { ...useFilters, page: n, per_page: peoplePageSize },
       );
       if (request !== searchRequest.current) return;
@@ -262,8 +332,8 @@ export function PeopleSearch({
               )
             : results.length
               ? t(
-                  `${(page - 1) * peoplePageSize + 1}–${(page - 1) * peoplePageSize + results.length} of ${total} people`,
-                  `第 ${(page - 1) * peoplePageSize + 1}–${(page - 1) * peoplePageSize + results.length} 位，共 ${total} 位`,
+                  `${(page - 1) * peoplePageSize + 1}–${(page - 1) * peoplePageSize + results.length} of ${total} ${domain === "academic" ? "mentors" : "people"}`,
+                  `第 ${(page - 1) * peoplePageSize + 1}–${(page - 1) * peoplePageSize + results.length} 位，共 ${total} 位${domain === "academic" ? "导师" : "人员"}`,
                 )
               : t("No profiles on this page", "本页没有人员")}
           {!hasMore && !busy && ` · ${t("End of results", "已到最后一页")}`}
@@ -302,15 +372,45 @@ export function PeopleSearch({
     );
   return (
     <>
-      <Heading title={t("People Search", "人员搜索")} />
+      <Heading
+        title={
+          domain === "academic"
+            ? t("Academic Mentor Search", "学术导师搜索")
+            : t("People Search", "人员搜索")
+        }
+      />
+      {controlledDomain === undefined && (
+        <div className="domain-switch" role="group" aria-label="Search domain">
+          <button
+            type="button"
+            aria-pressed={domain === "finance"}
+            onClick={() => setLocalDomain("finance")}
+          >
+            {t("Finance professionals", "金融人才")}
+          </button>
+          <button
+            type="button"
+            aria-pressed={domain === "academic"}
+            onClick={() => setLocalDomain("academic")}
+          >
+            {t("Academic mentors", "学术导师")}
+          </button>
+        </div>
+      )}
       <section className="panel search-panel">
         <div className="section-head">
           <h2>
             <SlidersHorizontal size={17} />
-            {t("Find your people", "筛选人员")}
+            {domain === "academic"
+              ? t("Find academic mentors", "筛选学术导师")
+              : t("Find your people", "筛选人员")}
           </h2>
           <Badge tone={config?.people_mode === "mock" ? "amber" : "green"}>
-            {config?.people_mode === "mock" ? "MOCK DATA" : "GOOGLE · SERPAPI"}
+            {config?.people_mode === "mock"
+              ? "MOCK DATA"
+              : domain === "academic"
+                ? "ACADEMIC · GOOGLE · SERPAPI"
+                : "GOOGLE · SERPAPI"}
           </Badge>
         </div>
         <form
@@ -323,18 +423,29 @@ export function PeopleSearch({
             {[
               [
                 "title",
-                "Job title",
-                "职位",
-                "e.g. Investment Banking Associate",
+                domain === "academic" ? "Academic title" : "Job title",
+                domain === "academic" ? "学术职称" : "职位",
+                domain === "academic"
+                  ? "e.g. Professor, Principal Investigator"
+                  : "e.g. Investment Banking Associate",
               ],
               [
                 "company",
-                "Company / institution",
-                "公司或机构",
-                "Name or domain",
+                domain === "academic"
+                  ? "Institution / university"
+                  : "Company / institution",
+                domain === "academic" ? "院校或机构" : "公司或机构",
+                domain === "academic"
+                  ? "University or institute"
+                  : "Name or domain",
               ],
               ["location", "Location", "地区", "e.g. New York"],
-              ["keywords", "Keywords", "关键词", "e.g. M&A"],
+              [
+                "keywords",
+                domain === "academic" ? "Research keywords" : "Keywords",
+                domain === "academic" ? "研究关键词" : "关键词",
+                domain === "academic" ? "e.g. multimodal learning" : "e.g. M&A",
+              ],
             ].map(([key, en, zh, ph]) => (
               <Field key={key} label={t(en, zh)}>
                 <input
@@ -348,21 +459,45 @@ export function PeopleSearch({
             ))}
           </div>
           <div className="search-bottom">
-            <Field label={t("Finance focus", "金融领域")}>
-              <select
-                value={filters.sector}
-                onChange={(e) =>
-                  setFilters({ ...filters, sector: e.target.value })
-                }
-              >
-                <option value="">
-                  {t("All finance areas", "全部金融领域")}
-                </option>
-                {sectors.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
+            <Field
+              label={
+                domain === "academic"
+                  ? t("Research area", "研究方向")
+                  : t("Finance focus", "金融领域")
+              }
+            >
+              {domain === "academic" ? (
+                <input
+                  list="academic-research-areas"
+                  value={filters.sector}
+                  placeholder={t("Any research area", "全部研究方向")}
+                  onChange={(e) =>
+                    setFilters({ ...filters, sector: e.target.value })
+                  }
+                />
+              ) : (
+                <select
+                  value={filters.sector}
+                  onChange={(e) =>
+                    setFilters({ ...filters, sector: e.target.value })
+                  }
+                >
+                  <option value="">
+                    {t("All finance areas", "全部金融领域")}
+                  </option>
+                  {sectors.map((sector) => (
+                    <option key={sector}>{sector}</option>
+                  ))}
+                </select>
+              )}
             </Field>
+            {domain === "academic" && (
+              <datalist id="academic-research-areas">
+                {academicSectors.map((sector) => (
+                  <option value={sector} key={sector} />
+                ))}
+              </datalist>
+            )}
             <Field label={t("Recommend for persona", "推荐所用画像")}>
               <select
                 value={personaId}
@@ -372,7 +507,7 @@ export function PeopleSearch({
                 <option value="">
                   {t("No persona · search freely", "无画像 · 自由搜索")}
                 </option>
-                {personas.map((p) => (
+                {domainPersonas.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.label}
                   </option>
@@ -384,19 +519,29 @@ export function PeopleSearch({
               disabled={restoring || busy || recommending}
             >
               {busy ? <Busy /> : <Search size={16} />}{" "}
-              {t("Search people", "搜索人员")}
+              {domain === "academic"
+                ? t("Search mentors", "搜索导师")
+                : t("Search people", "搜索人员")}
             </button>
           </div>
         </form>
         <p className="filter-note">
           {config?.people_mode === "live"
             ? t(
-                "Each search prepares public work and education details for this page through Apify before showing results. Cached profiles are reused; new retrievals may use credits. Filters are search keywords, not verified facts.",
-                "每页搜索会先通过 Apify 自动准备公开履历与教育信息，再展示结果。已有资料会复用缓存，新查询可能消耗额度。筛选项是搜索关键词，并非已核实的人物信息。",
+                domain === "academic"
+                  ? "Each search prepares public academic and professional details before showing results. Cached profiles are reused; filters are search keywords, not verified facts."
+                  : "Each search prepares public work and education details for this page through Apify before showing results. Cached profiles are reused; new retrievals may use credits. Filters are search keywords, not verified facts.",
+                domain === "academic"
+                  ? "每页搜索会先准备公开的学术与职业资料，再展示结果。已有资料会复用缓存；筛选项是搜索关键词，并非已核实的人物信息。"
+                  : "每页搜索会先通过 Apify 自动准备公开履历与教育信息，再展示结果。已有资料会复用缓存，新查询可能消耗额度。筛选项是搜索关键词，并非已核实的人物信息。",
               )
             : t(
-                "16 fictional profiles for testing. All filters work on this demo dataset.",
-                "16 位虚构专业人士用于测试，所有筛选均对演示数据实际生效。",
+                domain === "academic"
+                  ? "Fictional academic profiles for testing. All filters work on this demo dataset."
+                  : "16 fictional profiles for testing. All filters work on this demo dataset.",
+                domain === "academic"
+                  ? "虚构学术导师资料仅用于测试，所有筛选均对演示数据实际生效。"
+                  : "16 位虚构专业人士用于测试，所有筛选均对演示数据实际生效。",
               )}
         </p>
       </section>
@@ -426,7 +571,9 @@ export function PeopleSearch({
                     j.input.company ||
                       j.input.title ||
                       j.input.keywords ||
-                      t("All people", "全部人员"),
+                      (domain === "academic"
+                        ? t("All mentors", "全部导师")
+                        : t("All people", "全部人员")),
                   )}{" "}
                   · {t("Page", "第")} {String(j.input.page || 1)} ·{" "}
                   {new Date(j.created_at).toLocaleString()} · {j.status}
@@ -483,7 +630,10 @@ export function PeopleSearch({
                 )
               ) : (
                 <>
-                  {total} {t("people found", "位符合条件的人员")}
+                  {total}{" "}
+                  {domain === "academic"
+                    ? t("mentors found", "位符合条件的导师")
+                    : t("people found", "位符合条件的人员")}
                 </>
               )}
             </span>
@@ -496,7 +646,9 @@ export function PeopleSearch({
             onClick={() => void recommend()}
           >
             {recommending ? <Busy /> : <Sparkles size={15} />}{" "}
-            {t("Recommend first 5", "推荐当前前 5 位")}
+            {domain === "academic"
+              ? t("Recommend first 5 mentors", "推荐当前前 5 位导师")
+              : t("Recommend first 5", "推荐当前前 5 位")}
           </button>
         )}
       </div>
@@ -515,16 +667,28 @@ export function PeopleSearch({
         <div className="notice" role="status">
           <Busy />
           {t(
-            "Preparing this page and its profile details…",
-            "正在准备本页人员及其详情…",
+            domain === "academic"
+              ? "Preparing this page of mentors and their profile details…"
+              : "Preparing this page and its profile details…",
+            domain === "academic"
+              ? "正在准备本页导师及其资料…"
+              : "正在准备本页人员及其详情…",
           )}
         </div>
       ) : !searched ? (
         <Empty
-          title={t("Who would you like to meet?", "您想认识什么样的人？")}
+          title={
+            domain === "academic"
+              ? t("Which mentors would you like to meet?", "您想联系哪些导师？")
+              : t("Who would you like to meet?", "您想认识什么样的人？")
+          }
           detail={t(
-            "Set a few filters or search all finance professionals to get started.",
-            "设置筛选条件，或直接搜索全部金融领域专业人士。",
+            domain === "academic"
+              ? "Set a few filters or search all academic mentors to get started."
+              : "Set a few filters or search all finance professionals to get started.",
+            domain === "academic"
+              ? "设置筛选条件，或直接搜索全部学术导师。"
+              : "设置筛选条件，或直接搜索全部金融领域专业人士。",
           )}
         />
       ) : results.length ? (
@@ -532,6 +696,7 @@ export function PeopleSearch({
           <PeopleTable
             items={results}
             personaId={personaId}
+            domain={domain}
             onSelectContact={onSelectContact}
             selectedContactId={selectedContactId}
             onDetail={setDetail}
@@ -542,10 +707,18 @@ export function PeopleSearch({
         </>
       ) : (
         <Empty
-          title={t("No people found", "没有找到符合条件的人员")}
+          title={
+            domain === "academic"
+              ? t("No mentors found", "没有找到符合条件的导师")
+              : t("No people found", "没有找到符合条件的人员")
+          }
           detail={t(
-            "Try a broader title, location, or finance area.",
-            "请尝试更宽泛的职位、地区或领域条件。",
+            domain === "academic"
+              ? "Try a broader academic title, location, or research area."
+              : "Try a broader title, location, or finance area.",
+            domain === "academic"
+              ? "请尝试更宽泛的学术职称、地区或研究方向。"
+              : "请尝试更宽泛的职位、地区或领域条件。",
           )}
         />
       )}
@@ -553,14 +726,19 @@ export function PeopleSearch({
       <div className="source-footnote">
         <Link2 size={14} />
         {t(
-          "Open a person to read the prepared public profile. Unavailable details are marked; email lookup remains a separate action.",
-          "点击人员即可阅读已准备的公开详情；无法取得的信息会明确标记，查找邮箱仍需单独操作。",
+          domain === "academic"
+            ? "Open a mentor to read the prepared public profile. Unavailable details are marked; email lookup remains a separate action."
+            : "Open a person to read the prepared public profile. Unavailable details are marked; email lookup remains a separate action.",
+          domain === "academic"
+            ? "点击导师即可阅读已准备的公开资料；无法取得的信息会明确标记，查找邮箱仍需单独操作。"
+            : "点击人员即可阅读已准备的公开详情；无法取得的信息会明确标记，查找邮箱仍需单独操作。",
         )}
       </div>
       {detail && (
         <ContactDrawer
           key={detail.id}
           contact={detail}
+          domain={domain}
           personaId={personaId}
           allowProfileFetch={false}
           selectedContactId={selectedContactId}
@@ -583,6 +761,7 @@ export function PeopleSearch({
 export function PeopleTable({
   items,
   personaId,
+  domain,
   onDetail,
   onSaved,
   onSelectContact,
@@ -590,6 +769,7 @@ export function PeopleTable({
 }: {
   items: Contact[];
   personaId?: string;
+  domain?: OutreachDomain;
   onDetail: (c: Contact) => void;
   onSaved?: (c: Contact) => void;
   onSelectContact?: (c: Contact) => void;
@@ -624,8 +804,16 @@ export function PeopleTable({
       <table>
         <thead>
           <tr>
-            <th>{t("PERSON", "人员")}</th>
-            <th>{t("COMPANY", "机构")}</th>
+            <th>
+              {domain === "academic"
+                ? t("MENTOR", "导师")
+                : t("PERSON", "人员")}
+            </th>
+            <th>
+              {domain === "academic"
+                ? t("INSTITUTION", "院校机构")
+                : t("COMPANY", "机构")}
+            </th>
             <th>{t("LOCATION", "地区")}</th>
             <th>{t("EMAIL STATUS", "邮箱状态")}</th>
             <th className="match-column">
@@ -637,6 +825,7 @@ export function PeopleTable({
         </thead>
         <tbody>
           {items.map((c) => {
+            const itemDomain = domain || contactDomain(c);
             const p = personas.find((p) => p.id === personaId);
             const a = [...c.assessments]
               .reverse()
@@ -679,7 +868,10 @@ export function PeopleTable({
                 <td>
                   <strong className="company-name">{c.company || "—"}</strong>
                   <small>
-                    {c.domains.finance?.sector || t("Finance", "金融")}
+                    {c.domains[itemDomain]?.sector ||
+                      (itemDomain === "academic"
+                        ? t("Academic", "学术")
+                        : t("Finance", "金融"))}
                   </small>
                 </td>
                 <td>
@@ -724,7 +916,11 @@ export function PeopleTable({
                   <div className="row-actions">
                     <button
                       aria-label={(c.saved ? "Saved " : "Save ") + c.name}
-                      title={t("Save contact", "保存联系人")}
+                      title={
+                        itemDomain === "academic"
+                          ? t("Save mentor", "保存导师")
+                          : t("Save contact", "保存联系人")
+                      }
                       className={`icon-button ${c.saved ? "saved" : ""}`}
                       disabled={busy === c.id}
                       onClick={() => void save(c)}
@@ -751,7 +947,9 @@ export function PeopleTable({
                         )}
                         {selectedContactId === c.id
                           ? t("Selected", "已选择")
-                          : t("Use this contact", "选择此人")}
+                          : itemDomain === "academic"
+                            ? t("Use this mentor", "选择此导师")
+                            : t("Use this contact", "选择此人")}
                       </button>
                     ) : (
                       <button
@@ -762,7 +960,10 @@ export function PeopleTable({
                           void go(
                             "/email?contact=" +
                               c.id +
-                              (personaId ? "&persona=" + personaId : ""),
+                              (personaId ? "&persona=" + personaId : "") +
+                              (itemDomain === "academic"
+                                ? "&domain=academic"
+                                : ""),
                           )
                         }
                       >
@@ -904,6 +1105,7 @@ export function Contacts() {
 
 export function ContactDrawer({
   contact,
+  domain: requestedDomain,
   personaId = "",
   onClose,
   onUpdate,
@@ -912,6 +1114,7 @@ export function ContactDrawer({
   selectedContactId,
 }: {
   contact: Contact;
+  domain?: OutreachDomain;
   personaId?: string;
   onClose: () => void;
   onUpdate: (c: Contact) => void;
@@ -919,7 +1122,11 @@ export function ContactDrawer({
   onSelectContact?: (c: Contact) => void;
   selectedContactId?: string;
 }) {
+  const domain = requestedDomain || contactDomain(contact);
   const { t, locale, personas, refresh, notify, go, config } = useApp();
+  const domainPersonas = personas.filter(
+    (persona) => (persona.domain || "finance") === domain,
+  );
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -935,7 +1142,7 @@ export function ContactDrawer({
     [editing, setEditing] = useState(false),
     [busy, setBusy] = useState(""),
     [error, setError] = useState(""),
-    [pid, setPid] = useState(personaId || personas[0]?.id || ""),
+    [pid, setPid] = useState(personaId || domainPersonas[0]?.id || ""),
     [emailProvider, setEmailProvider] = useState<"email" | "email_apify">(
       "email_apify",
     );
@@ -991,6 +1198,7 @@ export function ContactDrawer({
       const r = await post<{ cached: boolean }>("/contacts/" + c.id + "/jobs", {
         kind,
         force,
+        domain,
       });
       if (!active.current) return;
       if (r.cached)
@@ -1016,7 +1224,7 @@ export function ContactDrawer({
     setError("");
     try {
       if (name === "assess") {
-        await post("/finance/assess", {
+        await post(`/${domain}/assess`, {
           contact_ids: [c.id],
           persona_id: pid,
           language: locale,
@@ -1054,6 +1262,7 @@ export function ContactDrawer({
     return (
       <ContactForm
         contact={c}
+        domain={domain}
         onClose={() => setEditing(false)}
         onDone={(updated) => {
           if (!active.current) return;
@@ -1064,7 +1273,14 @@ export function ContactDrawer({
       />
     );
   return (
-    <Drawer title={t("Contact details", "联系人详情")} onClose={close}>
+    <Drawer
+      title={
+        domain === "academic"
+          ? t("Mentor details", "导师详情")
+          : t("Contact details", "联系人详情")
+      }
+      onClose={close}
+    >
       <div className="drawer-profile">
         <Avatar name={c.name} large />
         <Badge tone={c.provider === "mock" ? "amber" : "blue"}>
@@ -1095,13 +1311,20 @@ export function ContactDrawer({
             )}
             {selectedContactId === c.id
               ? t("Selected", "已选择")
-              : t("Use this contact", "选择此人")}
+              : domain === "academic"
+                ? t("Use this mentor", "选择此导师")
+                : t("Use this contact", "选择此人")}
           </button>
         ) : (
           <button
             className="button primary"
             onClick={() =>
-              void go("/email?contact=" + c.id + (pid ? "&persona=" + pid : ""))
+              void go(
+                "/email?contact=" +
+                  c.id +
+                  (pid ? "&persona=" + pid : "") +
+                  (domain === "academic" ? "&domain=academic" : ""),
+              )
             }
           >
             <Mail size={16} />
@@ -1385,7 +1608,7 @@ export function ContactDrawer({
             onChange={(e) => setPid(e.target.value)}
           >
             <option value="">{t("Select persona", "选择画像")}</option>
-            {personas.map((p) => (
+            {domainPersonas.map((p) => (
               <option value={p.id} key={p.id}>
                 {p.label}
               </option>
@@ -1485,10 +1708,12 @@ export function ContactDrawer({
 
 function ContactForm({
   contact,
+  domain = "finance",
   onClose,
   onDone,
 }: {
   contact?: Contact;
+  domain?: OutreachDomain;
   onClose: () => void;
   onDone: (c: Contact) => void;
 }) {
@@ -1513,7 +1738,7 @@ function ContactForm({
       profile_url: contact?.profile_url || "",
       email: contact?.email || "",
       notes: contact?.notes || "",
-      sector: contact?.domains.finance?.sector || "",
+      sector: contact?.domains[domain]?.sector || "",
       tags: contact?.tags.join(", ") || "",
     }),
     [busy, setBusy] = useState(false),
@@ -1524,6 +1749,7 @@ function ContactForm({
     try {
       const body = {
         ...data,
+        domain,
         tags: data.tags
           .split(/[,，]/)
           .map((x) => x.trim())
@@ -1570,7 +1796,11 @@ function ContactForm({
             ["school", "School", "学校"],
             ["email", "Email (optional)", "邮箱（可选）"],
             ["profile_url", "Profile URL", "资料链接"],
-            ["sector", "Finance focus", "金融领域"],
+            [
+              "sector",
+              domain === "academic" ? "Research area" : "Finance focus",
+              domain === "academic" ? "研究方向" : "金融领域",
+            ],
             ["tags", "Tags (comma separated)", "标签（逗号分隔）"],
           ].map(([key, en, zh]) => (
             <Field key={key} label={t(en, zh)} className="full">

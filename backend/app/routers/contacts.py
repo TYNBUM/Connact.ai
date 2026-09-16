@@ -9,7 +9,7 @@ from ..models import (
     PeopleJob,
 )
 from ..schemas import ContactInput, ContactJobInput
-from ..services.contacts import row, contact_json, lock_contact
+from ..services.contacts import row, contact_json, lock_contact, ensure_domain_profile
 from ..services.people_jobs import enqueue, serialize, fresh, apply_email
 from ..providers import people_enrichment, public_search
 from ..config import settings
@@ -29,8 +29,22 @@ def detail(id: str, repo=Depends(get_repo)):
     return result
 
 
-def set_fields(repo, c, body):
+def inferred_domain(repo, contact, requested=None):
+    if requested:
+        return requested
+    profiles = [
+        p.domain
+        for p in repo.all(
+            ContactDomainProfile, ContactDomainProfile.contact_id == contact.id
+        )
+        if p.domain in ("finance", "academic")
+    ]
+    return profiles[0] if len(set(profiles)) == 1 else "finance"
+
+
+def set_fields(repo, c, body, domain):
     data = body.model_dump()
+    data.pop("domain")
     sector = data.pop("sector")
     email_changed = c.email != data["email"]
     if any(
@@ -77,20 +91,7 @@ def set_fields(repo, c, body):
         setattr(c, k, v)
     if email_changed:
         c.email_status = "unverified" if c.email else "not_requested"
-    profiles = repo.all(
-        ContactDomainProfile,
-        ContactDomainProfile.contact_id == c.id,
-        ContactDomainProfile.domain == "finance",
-    )
-    if profiles:
-        profiles[0].data = {"sector": sector}
-    else:
-        repo.add(
-            ContactDomainProfile,
-            contact_id=c.id,
-            domain="finance",
-            data={"sector": sector},
-        )
+    ensure_domain_profile(repo, c, domain, sector)
     repo.add(
         SourceEvidence,
         contact_id=c.id,
@@ -105,14 +106,17 @@ def set_fields(repo, c, body):
 @router.post("/contacts")
 def create(body: ContactInput, repo=Depends(get_repo)):
     c = repo.add(Contact, name=body.name, saved=True, provider="manual")
-    set_fields(repo, c, body)
+    set_fields(repo, c, body, body.domain)
     return contact_json(repo, c)
 
 
 @router.put("/contacts/{id}")
 def update(id: str, body: ContactInput, repo=Depends(get_repo)):
     c = lock_contact(repo, id)
-    set_fields(repo, c, body)
+    domain = inferred_domain(
+        repo, c, body.domain if "domain" in body.model_fields_set else None
+    )
+    set_fields(repo, c, body, domain)
     for draft in repo.all(Draft, Draft.contact_id == id):
         draft.status = "draft"
         draft.revision += 1
@@ -190,7 +194,10 @@ def sources(id: str, repo=Depends(get_repo)):
 @router.post("/contacts/{id}/jobs", status_code=202)
 def start_contact_job(id: str, body: ContactJobInput, repo=Depends(get_repo)):
     contact = repo.get(Contact, id)
-    job, cached = enqueue(repo, body.kind, {}, contact, body.force)
+    domain = inferred_domain(
+        repo, contact, body.domain if "domain" in body.model_fields_set else None
+    )
+    job, cached = enqueue(repo, body.kind, {}, contact, body.force, domain=domain)
     return {"job": serialize(repo, job), "cached": cached}
 
 

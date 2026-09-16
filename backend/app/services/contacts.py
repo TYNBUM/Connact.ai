@@ -72,15 +72,35 @@ def contact_json(repo, contact):
     return data
 
 
-def upsert_search(repo, item):
+def ensure_domain_profile(repo, contact, domain, sector=None):
+    profiles = repo.all(
+        ContactDomainProfile,
+        ContactDomainProfile.contact_id == contact.id,
+        ContactDomainProfile.domain == domain,
+    )
+    if profiles:
+        if sector is not None:
+            profiles[0].data = {**profiles[0].data, "sector": sector}
+        return profiles[0]
+    return repo.add(
+        ContactDomainProfile,
+        contact_id=contact.id,
+        domain=domain,
+        data={"sector": sector or ""},
+    )
+
+
+def upsert_search(repo, item, domain="finance"):
     item = dict(item)
     search_evidence = item.pop("search_evidence", None)
+    sector = item.pop("sector", "")
     existing = repo.all(
         Contact,
         Contact.provider == item["provider"],
         Contact.provider_id == item["provider_id"],
     )
     if existing:
+        ensure_domain_profile(repo, existing[0], domain, sector or None)
         if item["provider"] == "serpapi" and search_evidence:
             for evidence in repo.all(
                 SourceEvidence,
@@ -91,22 +111,18 @@ def upsert_search(repo, item):
             ):
                 evidence.kind = "discovery"
         return existing[0]
-    sector = item.pop("sector", "")
     try:
         with repo.session.begin_nested():
             contact = repo.add(Contact, **item)
     except IntegrityError:
-        return repo.all(
+        contact = repo.all(
             Contact,
             Contact.provider == item["provider"],
             Contact.provider_id == item["provider_id"],
         )[0]
-    repo.add(
-        ContactDomainProfile,
-        contact_id=contact.id,
-        domain="finance",
-        data={"sector": sector},
-    )
+        ensure_domain_profile(repo, contact, domain, sector or None)
+        return contact
+    ensure_domain_profile(repo, contact, domain, sector)
     repo.add(
         SourceEvidence,
         contact_id=contact.id,
@@ -126,8 +142,14 @@ def upsert_search(repo, item):
     return contact
 
 
-def assess(repo, contact, persona, language, ai, provider):
+def assess(repo, contact, persona, language, ai, provider, domain="finance"):
+    from fastapi import HTTPException
+
+    if persona.domain != domain:
+        raise HTTPException(422, "The sender profile belongs to a different domain.")
     data = contact_json(repo, contact)
+    if domain not in data["domains"]:
+        raise HTTPException(422, "The contact belongs to a different domain.")
     fingerprint = hashlib.sha256(
         json.dumps(
             {
@@ -149,15 +171,25 @@ def assess(repo, contact, persona, language, ai, provider):
     if cached:
         return row(cached[-1])
     dimensions = {}
-    for key, value, goal in [
+    candidates = [
         ("role", contact.title, persona.data.get("target_roles")),
         (
-            "sector",
-            data["domains"].get("finance", {}).get("sector"),
+            "research" if domain == "academic" else "sector",
+            data["domains"].get(domain, {}).get("sector"),
             persona.data.get("sectors"),
         ),
         ("location", contact.location, persona.data.get("target_regions")),
-    ]:
+    ]
+    if domain == "academic":
+        candidates.insert(
+            1,
+            (
+                "institution",
+                contact.company or contact.school,
+                persona.data.get("target_roles"),
+            ),
+        )
+    for key, value, goal in candidates:
         if value and goal:
             dimensions[key] = {"contact": value, "goal": goal}
     result = (
@@ -178,7 +210,8 @@ def assess(repo, contact, persona, language, ai, provider):
             for k in choices
         )
         reason = (
-            reason + "。可据此探讨职业路径。"
+            reason
+            + ("。可据此探讨研究契合度。" if domain == "academic" else "。可据此探讨职业路径。")
             if reason
             else "资料不足，无法评估与画像的相关性。"
         ) + " 未验证任何共同经历或人际关系。"
@@ -188,7 +221,12 @@ def assess(repo, contact, persona, language, ai, provider):
             for k in choices
         )
         reason = (
-            reason + ". A possible career conversation to explore."
+            reason
+            + (
+                ". A possible research-fit conversation to explore."
+                if domain == "academic"
+                else ". A possible career conversation to explore."
+            )
             if reason
             else "Insufficient profile data to assess relevance."
         ) + " No shared background or relationship is verified."

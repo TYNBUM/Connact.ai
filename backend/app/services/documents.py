@@ -17,12 +17,25 @@ HEADINGS = {
     "技能": "skills",
     "sectors": "sectors",
     "金融领域": "sectors",
+    "research interests": "sectors",
+    "research areas": "sectors",
+    "研究兴趣": "sectors",
+    "研究方向": "sectors",
+    "research experience": "experience",
+    "科研经历": "experience",
     "career goals": "career_goals",
     "职业目标": "career_goals",
+    "academic goals": "career_goals",
+    "学术目标": "career_goals",
     "target regions": "target_regions",
     "目标地区": "target_regions",
     "target roles": "target_roles",
     "目标机构或职位": "target_roles",
+    "target institutions": "target_roles",
+    "target labs": "target_roles",
+    "target programs": "target_roles",
+    "目标院校": "target_roles",
+    "目标实验室": "target_roles",
     "contact purpose": "contact_purpose",
     "联系目的": "contact_purpose",
 }
@@ -68,7 +81,7 @@ def extract_text(content: bytes, extension: str):
     return text
 
 
-def extract_sections(text):
+def extract_sections(text, domain="finance"):
     data = PersonaData().model_dump()
     lines = [x.strip() for x in text.splitlines() if x.strip()]
     first = lines[0] if lines else ""
@@ -104,7 +117,7 @@ from ..models import UploadedDocument, DocumentFile, now
 from .file_storage import read_content
 from ..providers.ai import CompatibleAI, MockAI, resolve_model
 
-PARSE_PROMPT_VERSION = "resume-parse-v1"
+PARSE_PROMPT_VERSION = "resume-parse-v2-domain"
 
 
 def document_response(document):
@@ -112,6 +125,7 @@ def document_response(document):
         "id": document.id,
         "document_id": document.id,
         "original_name": document.original_name,
+        "domain": document.domain,
         "status": document.status,
         "data": document.parsed_data,
         "error": document.error,
@@ -128,9 +142,10 @@ def document_response(document):
     }
 
 
-def cached_document(repo, digest, mode, provider, model, exclude_id=None):
+def cached_document(repo, digest, domain, mode, provider, model, exclude_id=None):
     conditions = [
         UploadedDocument.content_hash == digest,
+        UploadedDocument.domain == domain,
         UploadedDocument.parse_mode == mode,
         UploadedDocument.parse_provider == provider,
         UploadedDocument.parse_model == model,
@@ -143,7 +158,7 @@ def cached_document(repo, digest, mode, provider, model, exclude_id=None):
     return found[0] if found else None
 
 
-def queue_document(repo, file):
+def queue_document(repo, file, domain="finance"):
     name = Path(file.filename or "resume").name[:255]
     ext = Path(name).suffix.lower()
     if ext not in (".pdf", ".docx"):
@@ -162,7 +177,7 @@ def queue_document(repo, file):
         settings.ai_provider,
         resolve_model(),
     )
-    cached = cached_document(repo, digest, mode, provider, model)
+    cached = cached_document(repo, digest, domain, mode, provider, model)
     if cached:
         return cached
     if (
@@ -188,6 +203,7 @@ def queue_document(repo, file):
             document = repo.add(
                 UploadedDocument,
                 original_name=name,
+                domain=domain,
                 storage_key=key,
                 status="queued",
                 extracted_text="",
@@ -202,7 +218,7 @@ def queue_document(repo, file):
             return document
     except IntegrityError:
         path.unlink(missing_ok=True)
-        cached = cached_document(repo, digest, mode, provider, model)
+        cached = cached_document(repo, digest, domain, mode, provider, model)
         if cached:
             return cached
         raise
@@ -214,7 +230,13 @@ def retry_document(repo, document):
     mode, provider, model = settings.ai_mode, settings.ai_provider, resolve_model()
     if document.content_hash:
         cached = cached_document(
-            repo, document.content_hash, mode, provider, model, document.id
+            repo,
+            document.content_hash,
+            document.domain,
+            mode,
+            provider,
+            model,
+            document.id,
         )
         if cached:
             return cached
@@ -279,7 +301,11 @@ def process_document(document_id):
             document.parse_provider,
             document.parse_model,
         )
-        prompt_version, digest = document.parse_prompt_version, document.content_hash
+        prompt_version, digest, domain = (
+            document.parse_prompt_version,
+            document.content_hash,
+            document.domain,
+        )
         # Keep the original available even when a free host discards its local disk.
         try:
             stored_content = read_content(db, document)
@@ -306,7 +332,9 @@ def process_document(document_id):
             )
         extracted = extract_text(content, path.suffix.lower())
         provider = MockAI() if mode == "mock" else CompatibleAI()
-        result = provider.complete("parse", {"text": extracted, "_model": model})
+        result = provider.complete(
+            "parse", {"text": extracted, "domain": domain, "_model": model}
+        )
         if not isinstance(result, dict) or not isinstance(result.get("data"), dict):
             raise ValueError(
                 "The AI parser returned invalid data. Retry parsing or enter the background manually."

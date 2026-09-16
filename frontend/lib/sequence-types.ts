@@ -1,4 +1,4 @@
-import type { Draft, Preview } from "./types";
+import type { Draft, OutreachDomain, Preview } from "./types";
 
 export type SequenceStep = {
   id: string;
@@ -29,6 +29,7 @@ export type Sequence = {
   id: string;
   name: string;
   description: string;
+  domain: OutreachDomain;
   language: "en" | "zh";
   contact_id: string | null;
   persona_id: string | null;

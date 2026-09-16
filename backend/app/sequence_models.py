@@ -11,6 +11,7 @@ class Sequence(Scoped, Base):
     __tablename__ = "sequences"
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
+    domain: Mapped[str] = mapped_column(String(30), default="finance")
     language: Mapped[str] = mapped_column(String(10), default="en")
     contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id"))
     persona_id: Mapped[str | None] = mapped_column(ForeignKey("personas.id"))

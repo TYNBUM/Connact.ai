@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { api, post, put, errorText } from "@/lib/api";
-import type { Persona, PersonaData } from "@/lib/types";
+import type { OutreachDomain, Persona, PersonaData } from "@/lib/types";
 import { Heading, Field, Avatar, Badge, Busy, DateLabel, Nav } from "./ui";
 const blank: PersonaData = {
   name: "",
@@ -25,7 +25,7 @@ const blank: PersonaData = {
   target_roles: "",
   contact_purpose: "",
 };
-const fields: [keyof PersonaData, string, string, string][] = [
+const financeFields: [keyof PersonaData, string, string, string][] = [
   ["name", "Full name", "姓名", "Alex Morgan"],
   ["education", "Education", "教育经历", "School, degree, dates"],
   [
@@ -66,6 +66,52 @@ const fields: [keyof PersonaData, string, string, string][] = [
     "Learn about career paths in investment banking",
   ],
 ];
+const academicFields: [keyof PersonaData, string, string, string][] = [
+  ["name", "Full name", "姓名", "Alex Morgan"],
+  ["education", "Education", "教育经历", "School, degree, dates"],
+  [
+    "experience",
+    "Research and work experience",
+    "科研与工作经历",
+    "Research projects, roles, organizations and outcomes",
+  ],
+  [
+    "skills",
+    "Research skills and methods",
+    "研究技能与方法",
+    "Machine learning, qualitative methods, Python",
+  ],
+  [
+    "sectors",
+    "Research interests",
+    "研究方向",
+    "Medical AI, multimodal learning, causal inference",
+  ],
+  [
+    "career_goals",
+    "Academic goals",
+    "学术目标",
+    "The research opportunity or degree you are working toward",
+  ],
+  [
+    "target_regions",
+    "Target regions",
+    "目标地区",
+    "United States, Singapore, Europe",
+  ],
+  [
+    "target_roles",
+    "Target institutions or roles",
+    "目标院校或职位",
+    "Computer Science faculty, PhD supervisor, research lab",
+  ],
+  [
+    "contact_purpose",
+    "Default outreach purpose",
+    "默认联系目的",
+    "Ask about research fit and PhD opportunities",
+  ],
+];
 type ResumeJob = {
   document_id: string;
   original_name: string;
@@ -73,19 +119,27 @@ type ResumeJob = {
   data: PersonaData | null;
   extracted_text: string;
   error: string | null;
+  domain?: OutreachDomain;
 };
 export default function Personas({
   initialPersonaId,
   onSaved,
+  domain: controlledDomain,
 }: {
   initialPersonaId?: string;
   onSaved?: (persona: Persona) => void;
+  domain?: OutreachDomain;
 } = {}) {
   const { t, personas, refresh, notify, config } = useApp();
+  const [localDomain, setLocalDomain] = useState<OutreachDomain>("finance");
+  const domain = controlledDomain ?? localDomain;
+  const domainPersonas = personas.filter(
+    (persona) => (persona.domain || "finance") === domain,
+  );
   const initial =
     initialPersonaId === undefined
-      ? personas[0]
-      : personas.find((p) => p.id === initialPersonaId);
+      ? domainPersonas[0]
+      : domainPersonas.find((p) => p.id === initialPersonaId);
   const [selected, setSelected] = useState<Persona | null>(initial || null),
     [data, setData] = useState<PersonaData>(initial?.data || blank),
     [label, setLabel] = useState(initial?.label || ""),
@@ -98,9 +152,12 @@ export default function Personas({
     [parsed, setParsed] = useState<ResumeJob | null>(null),
     [documents, setDocuments] = useState<ResumeJob[]>([]),
     [hydrated, setHydrated] = useState(false);
-  const storageKey = `connact-persona-editor:${config?.workspace_id || "local-personal"}${onSaved ? ":finance:" + (initialPersonaId || "new") : ""}`;
+  const storageKey = `connact-persona-editor:${config?.workspace_id || "local-personal"}:${domain}${onSaved ? ":flow:" + (initialPersonaId || "new") : ""}`;
+  const fields = domain === "academic" ? academicFields : financeFields;
   const viewId = useRef(0);
   useEffect(() => {
+    let alive = true;
+    setDocuments([]);
     try {
       const cached = JSON.parse(sessionStorage.getItem(storageKey) || "null");
       const recover =
@@ -123,10 +180,15 @@ export default function Personas({
       /* Invalid local buffer does not replace server data. */
     }
     setHydrated(true);
-    void api<ResumeJob[]>("/documents")
-      .then(setDocuments)
+    void api<ResumeJob[]>(`/documents?domain=${domain}`)
+      .then((items) => {
+        if (alive) setDocuments(items);
+      })
       .catch(() => {});
-  }, [storageKey]);
+    return () => {
+      alive = false;
+    };
+  }, [storageKey, domain]);
   useEffect(() => {
     if (!hydrated) return;
     try {
@@ -176,9 +238,9 @@ export default function Personas({
               job.error ||
                 "Resume parsing failed. You can retry or enter details manually.",
             );
-          void api<ResumeJob[]>("/documents")
-            .then((v) => {
-              if (alive) setDocuments(v);
+          void api<ResumeJob[]>(`/documents?domain=${domain}`)
+            .then((items) => {
+              if (alive) setDocuments(items);
             })
             .catch(() => {});
           return;
@@ -193,7 +255,7 @@ export default function Personas({
       alive = false;
       clearTimeout(timer);
     };
-  }, [documentId, uploading]);
+  }, [documentId, uploading, domain]);
   const choose = (p: Persona | null) => {
     if (
       dirty &&
@@ -213,6 +275,36 @@ export default function Personas({
     setParsed(null);
     setUploading(false);
   };
+  const switchDomain = (next: OutreachDomain) => {
+    if (next === domain) return;
+    if (
+      dirty &&
+      !window.confirm(
+        t("Discard unsaved persona edits?", "放弃尚未保存的画像修改？"),
+      )
+    )
+      return;
+    viewId.current += 1;
+    try {
+      sessionStorage.removeItem(storageKey);
+    } catch {
+      /* Browser recovery is optional. */
+    }
+    setHydrated(false);
+    setLocalDomain(next);
+    const nextPersona = personas.find(
+      (persona) => (persona.domain || "finance") === next,
+    );
+    setSelected(nextPersona || null);
+    setData(nextPersona?.data || blank);
+    setLabel(nextPersona?.label || "");
+    setDocumentId(null);
+    setRaw("");
+    setError("");
+    setDirty(false);
+    setParsed(null);
+    setUploading(false);
+  };
   async function upload(file: File) {
     const targetView = viewId.current;
     setUploading(true);
@@ -220,6 +312,7 @@ export default function Personas({
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("domain", domain);
       const result = await api<ResumeJob>("/documents/jobs", {
         method: "POST",
         body: form,
@@ -261,6 +354,7 @@ export default function Personas({
     const targetView = viewId.current;
     try {
       const body = {
+        domain,
         label,
         data,
         document_id: documentId,
@@ -303,13 +397,31 @@ export default function Personas({
           {t("New persona", "新建画像")}
         </button>
       </Heading>
+      {controlledDomain === undefined && (
+        <div className="domain-switch" role="group" aria-label="Persona domain">
+          <button
+            type="button"
+            aria-pressed={domain === "finance"}
+            onClick={() => switchDomain("finance")}
+          >
+            {t("Finance", "金融")}
+          </button>
+          <button
+            type="button"
+            aria-pressed={domain === "academic"}
+            onClick={() => switchDomain("academic")}
+          >
+            {t("Academic", "学术")}
+          </button>
+        </div>
+      )}
       <div className="persona-layout">
         <aside className="persona-list">
           <div className="list-label">
             {t("YOUR PERSONAS", "您的画像")}
-            <Badge>{personas.length}</Badge>
+            <Badge>{domainPersonas.length}</Badge>
           </div>
-          {personas.map((p) => (
+          {domainPersonas.map((p) => (
             <button
               key={p.id}
               className={`persona-tile ${selected?.id === p.id ? "selected" : ""}`}
@@ -319,7 +431,10 @@ export default function Personas({
               <span>
                 <strong>{p.label}</strong>
                 <small>
-                  {p.data.sectors || t("Finance persona", "金融画像")}
+                  {p.data.sectors ||
+                    (domain === "academic"
+                      ? t("Academic persona", "学术画像")
+                      : t("Finance persona", "金融画像"))}
                 </small>
                 <small>
                   v{p.version} · <DateLabel value={p.updated_at} />
@@ -328,7 +443,7 @@ export default function Personas({
               {selected?.id === p.id && <Check size={16} />}
             </button>
           ))}
-          {!personas.length && (
+          {!domainPersonas.length && (
             <p className="muted">
               {t(
                 "Your saved personas will appear here.",
@@ -457,7 +572,11 @@ export default function Personas({
               <Upload size={23} />
             </span>
             <div>
-              <strong>{t("Start with your resume", "从简历开始")}</strong>
+              <strong>
+                {domain === "academic"
+                  ? t("Start with your CV or resume", "从学术简历开始")
+                  : t("Start with your resume", "从简历开始")}
+              </strong>
               <p>
                 {t(
                   "Text-based PDF or DOCX · Up to 8 MB · No scanned documents",
@@ -480,9 +599,15 @@ export default function Personas({
               {uploading ? <Busy /> : <Upload size={15} />}{" "}
               {uploading
                 ? t("Parsing…", "解析中…")
-                : t("Upload resume", "上传简历")}
+                : domain === "academic"
+                  ? t("Upload CV or resume", "上传学术简历")
+                  : t("Upload resume", "上传简历")}
               <input
-                aria-label="Upload resume"
+                aria-label={
+                  domain === "academic"
+                    ? "Upload CV or resume"
+                    : "Upload resume"
+                }
                 type="file"
                 accept=".pdf,.docx"
                 disabled={uploading}
@@ -540,8 +665,12 @@ export default function Personas({
                     value={label}
                     maxLength={150}
                     placeholder={t(
-                      "e.g. Investment banking opportunities",
-                      "例如：投资银行求职",
+                      domain === "academic"
+                        ? "e.g. 2027 Computer Science PhD"
+                        : "e.g. Investment banking opportunities",
+                      domain === "academic"
+                        ? "例如：2027 计算机博士申请"
+                        : "例如：投资银行求职",
                     )}
                     onChange={(e) => {
                       setLabel(e.target.value);

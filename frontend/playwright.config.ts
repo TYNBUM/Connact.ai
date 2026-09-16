@@ -6,6 +6,8 @@ export default defineConfig({
   timeout: 45000,
   use: {
     baseURL: process.env.E2E_URL || "http://127.0.0.1:3100",
+    channel:
+      process.env.E2E_BROWSER_CHANNEL === "chrome" ? "chrome" : undefined,
     viewport: { width: 1440, height: 1000 },
     permissions: ["clipboard-read", "clipboard-write"],
     screenshot: "only-on-failure",
