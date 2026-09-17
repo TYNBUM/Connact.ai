@@ -8,7 +8,6 @@ import {
   Sparkles,
   ContactRound,
   Landmark,
-  GraduationCap,
   Check,
   ShieldCheck,
   Mail,
@@ -309,10 +308,6 @@ export function Finance() {
   );
 }
 const purposes: Record<string, [string, string]> = {
-  academic: [
-    "A future research networking workspace: build an academic profile, discover researchers from cited sources, and draft a tailored introduction. Researcher search is not available in this phase.",
-    "未来的科研人脉工作区：建立学术画像、依据可引用来源寻找研究人员并撰写联系邮件。本阶段尚不支持导师搜索。",
-  ],
   templates: [
     "A future library for creating, organizing and reusing writing templates. Three Finance writing starting points are already available in Email Studio.",
     "未来支持创建、整理和复用邮件模板。邮件工作室已提供三种金融写作起点。",
@@ -420,11 +415,7 @@ export function ComingSoon({ path, title }: { path: string; title: string }) {
       <Heading title={title} />
       <section className="coming-soon">
         <div className="coming-icon">
-          {key === "academic" ? (
-            <GraduationCap size={38} />
-          ) : (
-            <BookOpen size={38} />
-          )}
+          <BookOpen size={38} />
         </div>
         <Badge tone="amber">Coming Soon</Badge>
         <h2>
@@ -440,17 +431,6 @@ export function ComingSoon({ path, title }: { path: string; title: string }) {
                 "请使用侧栏返回工作区。",
               )}
         </p>
-        {key === "academic" && (
-          <div className="future-flow">
-            <span>{t("Academic profile", "学术画像")}</span>
-            <ArrowRight size={15} />
-            <span>
-              {t("Cited researcher discovery", "有来源的研究人员搜索")}
-            </span>
-            <ArrowRight size={15} />
-            <span>{t("Personal introduction", "个性化介绍")}</span>
-          </div>
-        )}
         {key === "settings" && (
           <Nav href="/settings/integrations" className="button">
             {t("View current integrations", "查看当前集成配置")}

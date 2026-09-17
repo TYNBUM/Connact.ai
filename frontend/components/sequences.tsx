@@ -527,13 +527,27 @@ function DraftPicker({
   selected,
   setSelected,
   single = false,
+  domain,
 }: {
   selected: string[];
   setSelected: (ids: string[]) => void;
   single?: boolean;
+  domain?: "finance" | "academic";
 }) {
   const { t, drafts } = useApp();
   const [search, setSearch] = useState("");
+  const selectedDomain = selected.length
+    ? drafts.find((draft) => draft.id === selected[0])?.domain || "finance"
+    : undefined;
+  const visibleDrafts = drafts.filter(
+    (draft) =>
+      (!domain && !selectedDomain
+        ? true
+        : (draft.domain || "finance") === (domain || selectedDomain)) &&
+      (draft.subject + " " + draft.purpose)
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+  );
   return (
     <div className="sequence-draft-picker">
       <Field label={t("Search draft emails", "搜索草稿邮件")}>
@@ -549,40 +563,31 @@ function DraftPicker({
           "邮件会复制到序列中。请按期望的步骤顺序选择。",
         )}
       </p>
-      {drafts
-        .filter((d) =>
-          (d.subject + " " + d.purpose)
-            .toLowerCase()
-            .includes(search.toLowerCase()),
-        )
-        .map((d) => (
-          <label
-            key={d.id}
-            className={selected.includes(d.id) ? "selected" : ""}
-          >
-            <input
-              type={single ? "radio" : "checkbox"}
-              checked={selected.includes(d.id)}
-              onChange={() =>
-                setSelected(
-                  single
-                    ? [d.id]
-                    : selected.includes(d.id)
-                      ? selected.filter((x) => x !== d.id)
-                      : [...selected, d.id],
-                )
-              }
-            />
-            <span>
-              <b>{d.subject || t("Untitled draft", "未命名草稿")}</b>
-              <small>{d.purpose || d.writing_mode}</small>
-            </span>
-            {selected.includes(d.id) && (
-              <Badge>{selected.indexOf(d.id) + 1}</Badge>
-            )}
-          </label>
-        ))}
-      {!drafts.length && (
+      {visibleDrafts.map((d) => (
+        <label key={d.id} className={selected.includes(d.id) ? "selected" : ""}>
+          <input
+            type={single ? "radio" : "checkbox"}
+            checked={selected.includes(d.id)}
+            onChange={() =>
+              setSelected(
+                single
+                  ? [d.id]
+                  : selected.includes(d.id)
+                    ? selected.filter((x) => x !== d.id)
+                    : [...selected, d.id],
+              )
+            }
+          />
+          <span>
+            <b>{d.subject || t("Untitled draft", "未命名草稿")}</b>
+            <small>{d.purpose || d.writing_mode}</small>
+          </span>
+          {selected.includes(d.id) && (
+            <Badge>{selected.indexOf(d.id) + 1}</Badge>
+          )}
+        </label>
+      ))}
+      {!visibleDrafts.length && (
         <p>
           {t(
             "Create an email in Email Studio first, or start with a template.",
@@ -1296,6 +1301,12 @@ function ContextSettings({
   onNext: () => void;
 }) {
   const { t, contacts, personas } = useApp();
+  const domainContacts = contacts.filter(
+    (item) => !!item.domains[sequence.domain],
+  );
+  const domainPersonas = personas.filter(
+    (item) => (item.domain || "finance") === sequence.domain,
+  );
   const [contact, setContact] = useState(sequence.contact_id || "");
   const [persona, setPersona] = useState(sequence.persona_id || "");
   const dirty =
@@ -1319,7 +1330,7 @@ function ContextSettings({
         <Field label={t("Sequence contact", "序列联系人")}>
           <select value={contact} onChange={(e) => setContact(e.target.value)}>
             <option value="">{t("Choose later", "稍后选择")}</option>
-            {contacts.map((c) => (
+            {domainContacts.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} · {c.company}
               </option>
@@ -1329,7 +1340,7 @@ function ContextSettings({
         <Field label={t("Sequence sender persona", "序列发件人画像")}>
           <select value={persona} onChange={(e) => setPersona(e.target.value)}>
             <option value="">{t("Choose later", "稍后选择")}</option>
-            {personas.map((p) => (
+            {domainPersonas.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.label}
               </option>
@@ -1469,7 +1480,12 @@ function StepSettings({
           </select>
         </Field>
         {source === "draft" && (
-          <DraftPicker selected={draft} setSelected={setDraft} single />
+          <DraftPicker
+            selected={draft}
+            setSelected={setDraft}
+            single
+            domain={sequence.domain}
+          />
         )}
         {error && (
           <div className="error-panel" role="alert">

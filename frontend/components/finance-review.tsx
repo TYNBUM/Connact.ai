@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Download, GitBranch, Inbox, Clock3 } from "lucide-react";
 import { api, ApiError, errorText, post, put } from "@/lib/api";
 import { useApp } from "@/lib/context";
-import type { Draft, Preview } from "@/lib/types";
+import type { Draft, OutreachDomain, Preview } from "@/lib/types";
 import type { Sequence } from "@/lib/sequence-types";
 import { useDraft } from "@/lib/use-draft";
 import { Badge, Busy, Field, Nav } from "./ui";
@@ -332,11 +332,23 @@ function ReviewDraft({
   );
 }
 
-export function FinanceFollowup({ draftId }: { draftId: string }) {
-  return <FollowupDraft key={draftId} draftId={draftId} />;
+export function FinanceFollowup({
+  draftId,
+  domain = "finance",
+}: {
+  draftId: string;
+  domain?: OutreachDomain;
+}) {
+  return <FollowupDraft key={draftId} draftId={draftId} domain={domain} />;
 }
 
-function FollowupDraft({ draftId }: { draftId: string }) {
+function FollowupDraft({
+  draftId,
+  domain,
+}: {
+  draftId: string;
+  domain: OutreachDomain;
+}) {
   const { t, config, refresh } = useApp();
   const [name, setName] = useState("");
   const [source, setSource] = useState<Draft | null>(null);
@@ -347,7 +359,7 @@ function FollowupDraft({ draftId }: { draftId: string }) {
   const [finished, setFinished] = useState(false);
   const [version, setVersion] = useState(0);
   const creating = useRef(false);
-  const storageKey = `connact-finance-sequence:${config?.workspace_id || "local"}:${draftId}`;
+  const storageKey = `connact-${domain}-sequence:${config?.workspace_id || "local"}:${draftId}`;
 
   useEffect(() => {
     let active = true;
@@ -512,7 +524,11 @@ function FollowupDraft({ draftId }: { draftId: string }) {
               value={name}
               maxLength={200}
               disabled={busy}
-              placeholder={t("Finance outreach", "金融外联")}
+              placeholder={
+                domain === "academic"
+                  ? t("Academic outreach", "学术外联")
+                  : t("Finance outreach", "金融外联")
+              }
               onChange={(event) => setName(event.target.value)}
             />
           </Field>

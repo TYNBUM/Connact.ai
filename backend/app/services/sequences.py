@@ -9,7 +9,7 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.exc import IntegrityError
 from ..config import settings
 from ..db import Session, WorkspaceRepository
-from ..models import Contact, Draft, Persona, now
+from ..models import Contact, ContactDomainProfile, Draft, Persona, now
 from ..sequence_models import Sequence, SequenceStep, SequenceTemplate, SequenceJob
 from ..sequence_schemas import StepInput, TemplateInput, TemplateStep
 from ..providers.ai import CompatibleAI, MockAI
@@ -34,6 +34,8 @@ DEFAULT_TEMPLATES = [
         {"title": "Keep the door open", "purpose": "Follow up respectfully and leave the timing to the recipient.", "delay_days": 7, "thread_mode": "reply", "subject": "", "body_html": "<p>Hi {{name}},</p><p>I wanted to follow up on my note. There is no rush; if a conversation would be useful, I would be happy to find a time that works for you.</p><p>Best,<br>{{sender_name}}</p>"},
     ]},
 ]
+
+SEQUENCE_PROMPT_VERSION = "sequence-steps-v2-domain"
 
 
 def steps_for(repo, sequence_id):
@@ -89,17 +91,50 @@ def validate_context(repo, contact_id, persona_id):
     return repo.get(Persona, persona_id) if persona_id else None
 
 
+def validate_sequence_context(repo, sequence):
+    """Keep every sequence email, sender and recipient in one immutable domain."""
+    persona = validate_context(repo, sequence.contact_id, sequence.persona_id)
+    draft_domains = {
+        repo.get(Draft, step.draft_id).domain for step in steps_for(repo, sequence.id)
+    }
+    if draft_domains - {sequence.domain}:
+        raise HTTPException(
+            422, "All emails in a sequence must use the sequence's domain."
+        )
+    if persona and persona.domain != sequence.domain:
+        raise HTTPException(
+            422, "Sequence emails and the sender profile must use the same domain."
+        )
+    if sequence.contact_id and not repo.all(
+        ContactDomainProfile,
+        ContactDomainProfile.contact_id == sequence.contact_id,
+        ContactDomainProfile.domain == sequence.domain,
+    ):
+        raise HTTPException(
+            422, "Sequence emails and the recipient must use the same domain."
+        )
+    return persona
+
+
 def make_draft(repo, sequence, source_id=None, content=None):
     values = {}
     if source_id:
         source = repo.get(Draft, source_id)
         values = {c.name: deepcopy(getattr(source, c.name)) for c in Draft.__table__.columns
                   if c.name not in {"id", "workspace_id", "created_at", "updated_at", "revision", "status"}}
-    persona = validate_context(repo, sequence.contact_id, sequence.persona_id)
+    persona = validate_sequence_context(repo, sequence)
+    if values.get("domain") and values["domain"] != sequence.domain:
+        raise HTTPException(
+            422, "All emails in a sequence must use the sequence's domain."
+        )
     # A sequence has one preview recipient and sender. Source emails are independent copies.
     if values.get("contact_id") != sequence.contact_id:
         values["evidence_ids"] = []
-    values.update(contact_id=sequence.contact_id, persona_id=sequence.persona_id,
+    values.setdefault(
+        "starting_point",
+        "PhD Inquiry" if sequence.domain == "academic" else "Networking",
+    )
+    values.update(domain=sequence.domain, contact_id=sequence.contact_id, persona_id=sequence.persona_id,
                   persona_version=persona.version if persona else None, language=sequence.language,
                   status="draft", revision=1)
     if content:
@@ -152,13 +187,31 @@ def replace_steps(repo, sequence, supplied):
 
 def create_sequence(repo, body):
     contact_id, persona_id = body.contact_id, body.persona_id
+    first = None
     if body.draft_ids:
         first = repo.get(Draft, body.draft_ids[0])
         contact_id = contact_id or first.contact_id
         persona_id = persona_id or first.persona_id
-    validate_context(repo, contact_id, persona_id)
+    persona = validate_context(repo, contact_id, persona_id)
+    domain = body.domain or (first.domain if first else None)
+    if not domain and persona:
+        domain = persona.domain
+    if not domain and contact_id:
+        domains = {
+            profile.domain
+            for profile in repo.all(
+                ContactDomainProfile,
+                ContactDomainProfile.contact_id == contact_id,
+            )
+            if profile.domain in ("finance", "academic")
+        }
+        if domains == {"academic"}:
+            domain = "academic"
+    domain = domain or "finance"
     sequence = repo.add(Sequence, name=body.name, description=body.description,
-                        language=body.language, contact_id=contact_id, persona_id=persona_id)
+                        domain=domain, language=body.language,
+                        contact_id=contact_id, persona_id=persona_id)
+    validate_sequence_context(repo, sequence)
     if body.template_id:
         template = get_template(repo, body.template_id)
         replace_steps(repo, sequence, template["steps"])
@@ -166,25 +219,40 @@ def create_sequence(repo, body):
         replace_steps(repo, sequence, [StepInput(draft_id=id, title=f"Email {index + 1}",
             delay_days=0 if index == 0 else 3, thread_mode="new_thread" if index == 0 else "reply")
             for index, id in enumerate(body.draft_ids)])
+    validate_sequence_context(repo, sequence)
     return sequence
 
 
 def context_snapshot(repo, sequence):
     contact = repo.get(Contact, sequence.contact_id) if sequence.contact_id else None
-    persona = repo.get(Persona, sequence.persona_id) if sequence.persona_id else None
+    persona = validate_sequence_context(repo, sequence)
+    steps = steps_for(repo, sequence.id)
+    domain_profiles = (
+        repo.all(
+            ContactDomainProfile,
+            ContactDomainProfile.contact_id == contact.id,
+            ContactDomainProfile.domain == sequence.domain,
+        )
+        if contact
+        else []
+    )
     return {
+        "domain": sequence.domain,
         "contact_id": sequence.contact_id, "persona_id": sequence.persona_id,
         "recipient_email": contact.email if contact else "",
         "contact": {key: getattr(contact, key) for key in ("name", "title", "company", "school", "location")} if contact else {},
         "contact_provenance": contact.provider if contact else None,
+        "domain_profile": deepcopy(domain_profiles[0].data) if domain_profiles else {},
         "persona": deepcopy(persona.data) if persona else {},
+        "persona_domain": persona.domain if persona else None,
         "persona_version": persona.version if persona else None,
         "draft_revisions": [{"step_id": step.id, "draft_id": step.draft_id,
-            "revision": repo.get(Draft, step.draft_id).revision} for step in steps_for(repo, sequence.id)],
+            "revision": repo.get(Draft, step.draft_id).revision} for step in steps],
     }
 
 
 def sequence_preview(repo, sequence):
+    validate_sequence_context(repo, sequence)
     results, sequence_issues = [], []
     day, thread_subject = 0, ""
     for index, step in enumerate(steps_for(repo, sequence.id)):
@@ -224,6 +292,7 @@ def job_json(job):
 
 
 def sequence_json(repo, sequence, detail=True):
+    validate_sequence_context(repo, sequence)
     data = row(sequence)
     snapshot = data.pop("review_snapshot", {})
     data["review_stale"] = sequence.status == "ready" and snapshot != context_snapshot(repo, sequence)
@@ -248,6 +317,7 @@ def update_sequence(repo, sequence_id, body):
         setattr(sequence, key, value)
     if "steps" in body.model_fields_set:
         replace_steps(repo, sequence, body.steps)
+    validate_sequence_context(repo, sequence)
     if set(values) & {"contact_id", "persona_id", "language"}:
         persona = repo.get(Persona, sequence.persona_id) if sequence.persona_id else None
         for step in steps_for(repo, sequence.id):
@@ -288,7 +358,7 @@ def create_plan_job(repo, sequence, body):
     snapshot = context_snapshot(repo, sequence)
     snapshot.update(prompt=body.prompt, language=body.language or sequence.language,
                     sequence_name=sequence.name, description=sequence.description,
-                    prompt_version="sequence-steps-v1")
+                    prompt_version=SEQUENCE_PROMPT_VERSION)
     try:
         with repo.session.begin_nested():
             return repo.add(SequenceJob, sequence_id=sequence.id, sequence_revision=sequence.revision,
@@ -327,11 +397,11 @@ def process_sequence_job(job_id):
         db.commit()
     try:
         route = resolve_route(model)
-        if mode != settings.ai_mode or provider_name != route.provider or data.get("prompt_version") != "sequence-steps-v1":
+        if mode != settings.ai_mode or provider_name != route.provider or data.get("prompt_version") != SEQUENCE_PROMPT_VERSION:
             raise HTTPException(409, "AI configuration changed. Create a fresh sequence plan.")
         provider = MockAI() if mode == "mock" else CompatibleAI()
-        provider_data = {key: data[key] for key in ("prompt", "language", "sequence_name", "description",
-            "contact", "contact_provenance", "persona")}
+        provider_data = {key: data[key] for key in ("domain", "prompt", "language", "sequence_name", "description",
+            "contact", "contact_provenance", "domain_profile", "persona")}
         generated = []
         for index in range(total):
             # Each provider response is persisted before the next request. This is step progress,

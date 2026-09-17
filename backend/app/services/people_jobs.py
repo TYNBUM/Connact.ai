@@ -21,7 +21,7 @@ from ..models import (
     Draft,
     now,
 )
-from ..providers import people_search, people_enrichment
+from ..providers import canonical_people_filters, people_search, people_enrichment
 from ..providers.apify import ApifyProfileProvider
 from ..providers.base import LocalProviderRateLimit
 from ..providers.linkedin import linkedin_profile
@@ -140,9 +140,19 @@ def serialize(repo, job, include_result=True):
     return data
 
 
-def enqueue(repo, kind, payload, contact=None, force=False, reuse_failed=False):
+def enqueue(
+    repo,
+    kind,
+    payload,
+    contact=None,
+    force=False,
+    reuse_failed=False,
+    domain="finance",
+):
     if kind not in ("search", "profile", "email", "email_apify"):
         raise HTTPException(422, "Unknown people job type.")
+    if domain not in ("finance", "academic"):
+        raise HTTPException(422, "Unknown people job domain.")
     if contact:
         if kind in ("profile", "email_apify") and (
             settings.people_mode == "mock" or contact.provider == "mock"
@@ -169,9 +179,15 @@ def enqueue(repo, kind, payload, contact=None, force=False, reuse_failed=False):
         # Contact dates are not part of the upstream request snapshot.
         payload["contact"].pop("created_at", None)
         payload["contact"].pop("updated_at", None)
+    if kind == "search":
+        payload = canonical_people_filters(payload, domain)
     payload = {**payload, "mode": settings.people_mode}
     identity = (
-        ({**payload, "pipeline_version": 3} if kind == "search" else payload)
+        (
+            {**payload, "domain": domain, "pipeline_version": 4}
+            if kind == "search"
+            else payload
+        )
         if not contact
         else {
             "mode": settings.people_mode,
@@ -247,6 +263,7 @@ def enqueue(repo, kind, payload, contact=None, force=False, reuse_failed=False):
         job = repo.add(
             PeopleJob,
             kind=kind,
+            domain=domain,
             contact_id=contact.id if contact else None,
             input=payload,
             fingerprint=fingerprint,
@@ -268,7 +285,12 @@ def prepare_search_profiles(repo, job):
         else:
             try:
                 child, cached = enqueue(
-                    repo, "profile", {"automatic": True}, contact, reuse_failed=True
+                    repo,
+                    "profile",
+                    {"automatic": True},
+                    contact,
+                    reuse_failed=True,
+                    domain=job.domain,
                 )
                 states[contact_id] = {
                     "job_id": child.id,
@@ -465,9 +487,9 @@ def process_job(job_id):
             if job.kind == "search":
                 if "contact_ids" not in job.result:
                     filters = {k: v for k, v in job.input.items() if k != "mode"}
-                    result = people_search().search(filters)
+                    result = people_search(job.domain).search(filters)
                     found = [
-                        upsert_search(repo, item)
+                        upsert_search(repo, item, job.domain)
                         for item in result["people"][: filters["per_page"]]
                     ]
                     job.result = {
@@ -476,6 +498,7 @@ def process_job(job_id):
                         "page": filters["page"],
                         "per_page": filters["per_page"],
                         "mode": settings.people_mode,
+                        "domain": job.domain,
                         "has_more": result.get(
                             "has_more",
                             filters["page"] * filters["per_page"] < result["total"],

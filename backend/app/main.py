@@ -7,7 +7,7 @@ from sqlalchemy import select, text
 from .db import Session, get_repo
 from .models import Workspace
 from .config import settings
-from .routers import personas, contacts, finance, drafts, auth, export, admin, sequences, writing_templates
+from .routers import academic, personas, contacts, finance, drafts, auth, export, admin, sequences, writing_templates
 from .services.drafts import start_writing_worker, stop_writing_worker
 from .services.people_jobs import start_people_worker, stop_people_worker
 from .services.documents import start_document_worker, stop_document_worker
@@ -108,7 +108,7 @@ def config(request: Request, repo=Depends(get_repo)):
     }
 
 
-for router in (personas.router, contacts.router, finance.router, drafts.router, auth.router, export.router, admin.router, sequences.router, writing_templates.router):
+for router in (academic.router, personas.router, contacts.router, finance.router, drafts.router, auth.router, export.router, admin.router, sequences.router, writing_templates.router):
     app.include_router(router, prefix="/api")
 
 app.include_router(gmail.router, prefix="/api")

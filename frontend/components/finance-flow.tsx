@@ -4,13 +4,20 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  GraduationCap,
   Landmark,
   Plus,
   RotateCcw,
 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { api, post, put, errorText } from "@/lib/api";
-import type { Contact, Draft, Persona, Preview } from "@/lib/types";
+import type {
+  Contact,
+  Draft,
+  OutreachDomain,
+  Persona,
+  Preview,
+} from "@/lib/types";
 import { Avatar, Badge, Busy, Field, Heading, Nav } from "./ui";
 import Personas from "./personas";
 import { PeopleSearch } from "./people";
@@ -32,18 +39,38 @@ const empty: Progress = {
   draftId: "",
   searchJobId: "",
 };
-const steps = [
+const financeSteps = [
   ["Profile", "画像准备"],
   ["People", "选择联系人"],
   ["Write", "撰写邮件"],
   ["Review", "预览审核"],
   ["Follow-up", "后续跟进"],
 ];
+const academicSteps = [
+  ["Profile", "学术画像"],
+  ["Mentors", "选择导师"],
+  ["Write", "撰写邮件"],
+  ["Review", "预览审核"],
+  ["Follow-up", "后续跟进"],
+];
 
-export default function FinanceFlow() {
+export default function FinanceFlow({
+  domain = "finance",
+}: {
+  domain?: OutreachDomain;
+} = {}) {
   const { t, locale, personas, contacts, drafts, config, guard, refresh } =
     useApp();
-  const storageKey = `connact-finance-flow:${config?.workspace_id || "local-personal"}`;
+  const domainPersonas = personas.filter(
+    (persona) => (persona.domain || "finance") === domain,
+  );
+  const domainContacts = contacts.filter(
+    (contact) => !!contact.domains[domain],
+  );
+  const domainDrafts = drafts.filter(
+    (draft) => (draft.domain || "finance") === domain,
+  );
+  const storageKey = `connact-${domain}-flow:${config?.workspace_id || "local-personal"}`;
   const [flow, setFlow] = useState<Progress>(empty);
   const [hydrated, setHydrated] = useState(false);
   const [contact, setContact] = useState<Contact | null>(null);
@@ -53,16 +80,18 @@ export default function FinanceFlow() {
   const [reviewed, setReviewed] = useState(false);
   const acting = useRef(false);
   const content = useRef<HTMLDivElement>(null);
-  const persona = personas.find((p) => p.id === flow.personaId);
+  const persona = domainPersonas.find((p) => p.id === flow.personaId);
+  const steps = domain === "academic" ? academicSteps : financeSteps;
+  const DomainIcon = domain === "academic" ? GraduationCap : Landmark;
 
   useEffect(() => {
-    let restored = { ...empty, personaId: personas[0]?.id || "" };
+    let restored = { ...empty, personaId: domainPersonas[0]?.id || "" };
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) || "null");
       if (saved && typeof saved === "object") {
-        const p = personas.find((p) => p.id === saved.personaId);
+        const p = domainPersonas.find((p) => p.id === saved.personaId);
         if (p) {
-          const d = drafts.find(
+          const d = domainDrafts.find(
             (d) =>
               d.id === saved.draftId &&
               d.persona_id === p.id &&
@@ -89,7 +118,7 @@ export default function FinanceFlow() {
       /* An invalid browser record never replaces saved workspace data. */
     }
     setFlow(restored);
-    setEditor(personas.length ? null : "");
+    setEditor(domainPersonas.length ? null : "");
     setHydrated(true);
   }, [storageKey]);
 
@@ -107,7 +136,7 @@ export default function FinanceFlow() {
       setContact(null);
       return;
     }
-    const saved = contacts.find((c) => c.id === flow.contactId);
+    const saved = domainContacts.find((c) => c.id === flow.contactId);
     if (saved) {
       setContact(saved);
       return;
@@ -124,7 +153,7 @@ export default function FinanceFlow() {
     return () => {
       alive = false;
     };
-  }, [flow.contactId, contacts]);
+  }, [flow.contactId, contacts, domain]);
 
   const selectPersona = (p: Persona | undefined) => {
     setError("");
@@ -160,13 +189,20 @@ export default function FinanceFlow() {
       let current: Draft | null = null;
       if (step >= 2) {
         if (!contact || contact.id !== flow.contactId)
-          throw new Error(t("Select a contact first.", "请先选择联系人。"));
+          throw new Error(
+            domain === "academic"
+              ? t("Select a mentor first.", "请先选择导师。")
+              : t("Select a contact first.", "请先选择联系人。"),
+          );
         if (!draftId) {
           await post("/contacts/" + contact.id + "/save");
           const created = await post<Draft>("/drafts", {
+            domain,
             contact_id: contact.id,
             persona_id: persona!.id,
             purpose: persona!.data.contact_purpose,
+            starting_point:
+              domain === "academic" ? "PhD Inquiry" : "Networking",
             language: locale === "zh" ? "zh" : "en",
           });
           draftId = created.id;
@@ -175,6 +211,7 @@ export default function FinanceFlow() {
         }
         current = await api<Draft>("/drafts/" + draftId);
         if (
+          (current.domain || "finance") !== domain ||
           current.persona_id !== flow.personaId ||
           current.contact_id !== flow.contactId
         ) {
@@ -263,14 +300,21 @@ export default function FinanceFlow() {
   return (
     <div
       className="finance-flow"
-      data-testid="finance-flow"
+      data-testid={`${domain}-flow`}
+      data-domain={domain}
       data-step={flow.step}
     >
       <Heading
-        title={t("Finance", "金融")}
+        title={
+          domain === "academic" ? t("Academic", "学术") : t("Finance", "金融")
+        }
         detail={t(
-          "From your background to a thoughtful conversation, one step at a time.",
-          "从职业背景到建立联系，一步步完成您的金融外联流程。",
+          domain === "academic"
+            ? "From your research background to a thoughtful mentor conversation, one step at a time."
+            : "From your background to a thoughtful conversation, one step at a time.",
+          domain === "academic"
+            ? "从研究背景到联系导师，一步步完成您的学术外联流程。"
+            : "从职业背景到建立联系，一步步完成您的金融外联流程。",
         )}
       >
         <button
@@ -285,14 +329,22 @@ export default function FinanceFlow() {
       <section className="finance-flow-guide panel">
         <div className="finance-flow-intro">
           <span className="finance-flow-symbol">
-            <Landmark size={24} />
+            <DomainIcon size={24} />
           </span>
           <div>
-            <h2>{t("Your finance outreach workflow", "金融外联引导")}</h2>
+            <h2>
+              {domain === "academic"
+                ? t("Your academic outreach workflow", "学术外联引导")
+                : t("Your finance outreach workflow", "金融外联引导")}
+            </h2>
             <p>
               {t(
-                "Choose your profile and contact once. Keep your context through writing, review, and follow-up.",
-                "选好画像和联系人，将背景一路带入写作、审核和后续跟进。",
+                domain === "academic"
+                  ? "Choose your academic profile and mentor once. Keep that context through writing, review, and follow-up."
+                  : "Choose your profile and contact once. Keep your context through writing, review, and follow-up.",
+                domain === "academic"
+                  ? "选好学术画像和导师，将研究背景一路带入写作、审核和后续跟进。"
+                  : "选好画像和联系人，将背景一路带入写作、审核和后续跟进。",
               )}
             </p>
           </div>
@@ -300,7 +352,11 @@ export default function FinanceFlow() {
         </div>
         <nav
           className="finance-flow-steps"
-          aria-label={t("Finance workflow steps", "金融引导步骤")}
+          aria-label={
+            domain === "academic"
+              ? t("Academic workflow steps", "学术引导步骤")
+              : t("Finance workflow steps", "金融引导步骤")
+          }
         >
           {steps.map(([en, zh], i) => (
             <button
@@ -327,7 +383,9 @@ export default function FinanceFlow() {
             )}
             {contact && (
               <span>
-                {t("Contact", "联系人")}
+                {domain === "academic"
+                  ? t("Mentor", "导师")
+                  : t("Contact", "联系人")}
                 <strong>
                   {contact.name} · {contact.company}
                 </strong>
@@ -352,11 +410,22 @@ export default function FinanceFlow() {
           {flow.step === 0 && (
             <>
               <section className="panel finance-profile-picker">
-                <h2>{t("Start with your background", "从您的职业背景开始")}</h2>
+                <h2>
+                  {domain === "academic"
+                    ? t(
+                        "Start with your research background",
+                        "从您的研究背景开始",
+                      )
+                    : t("Start with your background", "从您的职业背景开始")}
+                </h2>
                 <p>
                   {t(
-                    "Choose a saved persona, enter your details, or import a resume. Save the persona to continue.",
-                    "选择已有画像，或填写背景、导入简历。保存画像后继续。",
+                    domain === "academic"
+                      ? "Choose a saved academic persona, enter your details, or import a CV. Save the persona to continue."
+                      : "Choose a saved persona, enter your details, or import a resume. Save the persona to continue.",
+                    domain === "academic"
+                      ? "选择已有学术画像，或填写研究背景、导入学术简历。保存画像后继续。"
+                      : "选择已有画像，或填写背景、导入简历。保存画像后继续。",
                   )}
                 </p>
                 <div className="finance-profile-actions">
@@ -366,14 +435,14 @@ export default function FinanceFlow() {
                       disabled={editor !== null}
                       onChange={(e) =>
                         selectPersona(
-                          personas.find((p) => p.id === e.target.value),
+                          domainPersonas.find((p) => p.id === e.target.value),
                         )
                       }
                     >
                       <option value="">
                         {t("Choose a persona", "请选择画像")}
                       </option>
-                      {personas.map((p) => (
+                      {domainPersonas.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.label}
                         </option>
@@ -414,7 +483,8 @@ export default function FinanceFlow() {
               {editor !== null && (
                 <div className="finance-embedded-persona">
                   <Personas
-                    key={editor}
+                    key={`${domain}:${editor}`}
+                    domain={domain}
                     initialPersonaId={editor}
                     onSaved={(p) => {
                       selectPersona(p);
@@ -432,30 +502,42 @@ export default function FinanceFlow() {
             <>
               <p className="finance-step-hint">
                 {t(
-                  "Search, inspect the public profile and recommendations, then choose one person for this email.",
-                  "搜索人员，查看公开履历和推荐理由，再选择本次联系的对象。",
+                  domain === "academic"
+                    ? "Search, inspect the public profile and recommendation, then choose one mentor for this email."
+                    : "Search, inspect the public profile and recommendations, then choose one person for this email.",
+                  domain === "academic"
+                    ? "搜索导师，查看公开资料和推荐理由，再选择本次联系的导师。"
+                    : "搜索人员，查看公开履历和推荐理由，再选择本次联系的对象。",
                 )}
               </p>
-              {contacts.length > 0 && (
+              {domainContacts.length > 0 && (
                 <div className="finance-saved-contact">
                   <Field
-                    label={t("Or choose a saved contact", "也可选择已有联系人")}
+                    label={
+                      domain === "academic"
+                        ? t("Or choose a saved mentor", "也可选择已保存导师")
+                        : t("Or choose a saved contact", "也可选择已有联系人")
+                    }
                   >
                     <select
                       value={
-                        contacts.some((c) => c.id === flow.contactId)
+                        domainContacts.some((c) => c.id === flow.contactId)
                           ? flow.contactId
                           : ""
                       }
                       onChange={(e) => {
-                        const c = contacts.find((c) => c.id === e.target.value);
+                        const c = domainContacts.find(
+                          (c) => c.id === e.target.value,
+                        );
                         if (c) selectContact(c);
                       }}
                     >
                       <option value="">
-                        {t("Select from contacts", "从联系人中选择")}
+                        {domain === "academic"
+                          ? t("Select from saved mentors", "从已保存导师中选择")
+                          : t("Select from contacts", "从联系人中选择")}
                       </option>
-                      {contacts.map((c) => (
+                      {domainContacts.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name} · {c.company}
                         </option>
@@ -465,6 +547,7 @@ export default function FinanceFlow() {
                 </div>
               )}
               <PeopleSearch
+                domain={domain}
                 selectedPersonaId={flow.personaId}
                 selectedContactId={flow.contactId}
                 onSelectContact={selectContact}
@@ -506,7 +589,11 @@ export default function FinanceFlow() {
             />
           )}
           {flow.step === 4 && flow.draftId && (
-            <FinanceFollowup key={flow.draftId} draftId={flow.draftId} />
+            <FinanceFollowup
+              key={flow.draftId}
+              draftId={flow.draftId}
+              domain={domain}
+            />
           )}
         </fieldset>
       </div>
@@ -521,7 +608,12 @@ export default function FinanceFlow() {
         </button>
         <span>
           {flow.step === 1 && contact
-            ? t(`Selected: ${contact.name}`, `已选择：${contact.name}`)
+            ? domain === "academic"
+              ? t(
+                  `Selected mentor: ${contact.name}`,
+                  `已选择导师：${contact.name}`,
+                )
+              : t(`Selected: ${contact.name}`, `已选择：${contact.name}`)
             : t(
                 "Progress is kept in this browser tab.",
                 "当前浏览器标签页会保留流程进度。",
@@ -542,7 +634,9 @@ export default function FinanceFlow() {
             {busy ? <Busy /> : <ArrowRight size={16} />}
             {
               [
-                t("Continue to people", "继续选择联系人"),
+                domain === "academic"
+                  ? t("Continue to mentors", "继续选择导师")
+                  : t("Continue to people", "继续选择联系人"),
                 t("Continue to writing", "继续撰写邮件"),
                 t("Continue to review", "继续预览审核"),
                 t("Continue to follow-up", "继续后续跟进"),

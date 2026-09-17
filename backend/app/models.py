@@ -52,6 +52,7 @@ class PersonaRevision(Scoped, Base):
     __tablename__ = "persona_revisions"
     __table_args__ = (UniqueConstraint("workspace_id", "persona_id", "version"),)
     persona_id: Mapped[str] = mapped_column(ForeignKey("personas.id"), index=True)
+    domain: Mapped[str] = mapped_column(String(30), default="finance")
     version: Mapped[int] = mapped_column(Integer)
     data: Mapped[dict] = mapped_column(JSON)
 
@@ -59,12 +60,13 @@ class PersonaRevision(Scoped, Base):
 class UploadedDocument(Scoped, Base):
     __tablename__ = "uploaded_documents"
     __table_args__ = (Index(
-        "uq_documents_cached_parse", "workspace_id", "content_hash", "parse_mode", "parse_provider", "parse_model", "parse_prompt_version",
+        "uq_documents_cached_parse", "workspace_id", "domain", "content_hash", "parse_mode", "parse_provider", "parse_model", "parse_prompt_version",
         unique=True,
         sqlite_where=text("content_hash IS NOT NULL AND status IN ('queued', 'processing', 'parsed')"),
         postgresql_where=text("content_hash IS NOT NULL AND status IN ('queued', 'processing', 'parsed')"),
     ),)
     original_name: Mapped[str] = mapped_column(String(255))
+    domain: Mapped[str] = mapped_column(String(30), default="finance")
     storage_key: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(30))
     error: Mapped[str | None] = mapped_column(Text)
@@ -142,6 +144,7 @@ class Draft(Scoped, Base):
     contact_id: Mapped[str | None] = mapped_column(
         ForeignKey("contacts.id"), index=True
     )
+    domain: Mapped[str] = mapped_column(String(30), default="finance")
     persona_id: Mapped[str | None] = mapped_column(ForeignKey("personas.id"))
     persona_version: Mapped[int | None] = mapped_column(Integer)
     language: Mapped[str] = mapped_column(String(10), default="en")
@@ -187,6 +190,7 @@ class WritingJob(Scoped, Base):
 class PeopleJob(Scoped, Base):
     __tablename__ = "people_jobs"
     kind: Mapped[str] = mapped_column(String(30))
+    domain: Mapped[str] = mapped_column(String(30), default="finance", index=True)
     contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)

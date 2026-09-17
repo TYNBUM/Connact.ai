@@ -1,8 +1,17 @@
 from time import monotonic, sleep
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import update as sql_update
 from ..db import get_repo
-from ..models import Draft, Contact, Persona, SourceEvidence, WritingJob, now
+from ..models import (
+    Draft,
+    Contact,
+    ContactDomainProfile,
+    Persona,
+    SourceEvidence,
+    WritingJob,
+    now,
+)
 from ..schemas import DraftInput, GenerateInput, AcceptGenerationInput
 from ..services.contacts import row
 from ..services.drafts import (
@@ -18,6 +27,25 @@ from ..config import settings
 
 router = APIRouter()
 
+STARTING_POINTS = {
+    "finance": {
+        "Networking",
+        "Informational Interview",
+        "Recruiting",
+        "Follow-up",
+        "Introduction",
+    },
+    "academic": {
+        "PhD Inquiry",
+        "Research Masters Inquiry",
+        "Research Internship",
+        "Research Assistant",
+        "Postdoc Inquiry",
+        "Academic Collaboration",
+        "Follow-up",
+    },
+}
+
 
 def locked(repo, id, revision):
     d = repo.session.scalar(repo.query(Draft).where(Draft.id == id).with_for_update())
@@ -31,10 +59,40 @@ def locked(repo, id, revision):
     return d
 
 
-def apply(repo, d, body):
-    if body.contact_id:
-        repo.get(Contact, body.contact_id)
+def apply(repo, d, body, creating=False):
+    contact = repo.get(Contact, body.contact_id) if body.contact_id else None
     p = repo.get(Persona, body.persona_id) if body.persona_id else None
+    if creating:
+        domain = (
+            body.domain
+            if "domain" in body.model_fields_set
+            else (p.domain if p else "finance")
+        )
+    else:
+        domain = d.domain
+        if "domain" in body.model_fields_set and body.domain != domain:
+            raise HTTPException(422, "A draft's domain cannot be changed after creation.")
+    if p and p.domain != domain:
+        raise HTTPException(
+            422, "The draft and sender profile must use the same domain."
+        )
+    if contact and not repo.all(
+        ContactDomainProfile,
+        ContactDomainProfile.contact_id == contact.id,
+        ContactDomainProfile.domain == domain,
+    ):
+        raise HTTPException(
+            422, "The draft and recipient must use the same domain."
+        )
+    starting_point = body.starting_point
+    if "starting_point" not in body.model_fields_set:
+        starting_point = (
+            "PhD Inquiry" if creating and domain == "academic" else d.starting_point
+        )
+    if starting_point not in STARTING_POINTS[domain]:
+        raise HTTPException(
+            422, "The writing starting point must belong to the draft's domain."
+        )
     if body.model:
         resolve_model(body.model)
     for source_id in body.evidence_ids:
@@ -43,8 +101,12 @@ def apply(repo, d, body):
             raise HTTPException(
                 422, "Selected evidence must belong to this draft's recipient."
             )
-    for k, v in body.model_dump(exclude={"revision"}).items():
+    for k, v in body.model_dump(
+        exclude={"revision", "domain", "starting_point"}
+    ).items():
         setattr(d, k, v)
+    d.domain = domain
+    d.starting_point = starting_point
     d.evidence_ids = list(dict.fromkeys(d.evidence_ids))
     d.body_html = sanitize(d.body_html)
     d.persona_version = p.version if p else None
@@ -128,17 +190,23 @@ def models(repo=Depends(get_repo)):
 
 
 @router.get("/drafts")
-def drafts(repo=Depends(get_repo)):
+def drafts(
+    domain: Literal["finance", "academic"] | None = Query(default=None),
+    repo=Depends(get_repo),
+):
+    conditions = [Draft.domain == domain] if domain else []
     return [
         row(d)
-        for d in sorted(repo.all(Draft), key=lambda x: x.updated_at, reverse=True)
+        for d in sorted(
+            repo.all(Draft, *conditions), key=lambda x: x.updated_at, reverse=True
+        )
     ]
 
 
 @router.post("/drafts")
 def create(body: DraftInput, repo=Depends(get_repo)):
     d = repo.add(Draft)
-    apply(repo, d, body)
+    apply(repo, d, body, creating=True)
     repo.session.flush()
     return row(d)
 

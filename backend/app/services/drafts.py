@@ -109,7 +109,9 @@ def writing_snapshot(repo, draft):
     )
     return deepcopy(
         {
+            "domain": draft.domain,
             "persona_id": persona.id if persona else None,
+            "persona_domain": persona.domain if persona else None,
             "persona_version": persona.version if persona else None,
             "persona": persona.data if persona else {},
             "contact_id": contact.id if contact else None,
@@ -134,6 +136,9 @@ def writing_snapshot(repo, draft):
                 else (contact.provider if contact else None)
             ),
             "professional": professional,
+            "domain_profile": contact_data.get("domains", {}).get(
+                draft.domain, {}
+            ),
             "source_ids": list(dict.fromkeys(draft.evidence_ids or [])),
             "evidence": evidence,
             **{

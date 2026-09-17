@@ -25,6 +25,7 @@ import type {
   Contact,
   Preview,
   Generation,
+  OutreachDomain,
   WritingModels,
 } from "@/lib/types";
 import { useDraft } from "@/lib/use-draft";
@@ -41,18 +42,33 @@ export default function EmailStudio() {
   const id = query.get("draft"),
     contact = query.get("contact"),
     persona = query.get("persona");
+  const queryDomain: OutreachDomain =
+    query.get("domain") === "academic" ? "academic" : "finance";
+  const currentDraft = drafts.find((draft) => draft.id === id);
+  const domain: OutreachDomain = currentDraft?.domain || queryDomain;
   const creating = useRef("");
   const [busy, setBusy] = useState(false);
-  async function create(cid: string | null = null, pid: string | null = null) {
+  async function create(
+    cid: string | null = null,
+    pid: string | null = null,
+    draftDomain: OutreachDomain = "finance",
+  ) {
     setBusy(true);
     try {
       if (guard.current) await guard.current();
       const d = await post<Draft>("/drafts", {
+        domain: draftDomain,
         contact_id: cid,
         persona_id: pid,
+        starting_point:
+          draftDomain === "academic" ? "PhD Inquiry" : "Networking",
       });
       await refresh();
-      await go("/email?draft=" + d.id);
+      await go(
+        "/email?draft=" +
+          d.id +
+          (draftDomain === "academic" ? "&domain=academic" : ""),
+      );
     } catch (e) {
       notify(errorText(e));
     } finally {
@@ -60,11 +76,12 @@ export default function EmailStudio() {
     }
   }
   useEffect(() => {
-    if (contact && !id && creating.current !== `${contact}:${persona || ""}`) {
-      creating.current = `${contact}:${persona || ""}`;
-      void create(contact, persona);
+    const context = `${domain}:${contact}:${persona || ""}`;
+    if (contact && !id && creating.current !== context) {
+      creating.current = context;
+      void create(contact, persona, domain);
     }
-  }, [contact, id, persona]);
+  }, [contact, id, persona, domain]);
   return (
     <>
       <Heading
@@ -77,7 +94,7 @@ export default function EmailStudio() {
         <button
           className="button primary"
           disabled={busy}
-          onClick={() => void create()}
+          onClick={() => void create(null, null, domain)}
         >
           {busy ? <Busy /> : <Plus size={16} />} {t("New draft", "新建草稿")}
         </button>
@@ -93,7 +110,13 @@ export default function EmailStudio() {
               <Nav
                 key={d.id}
                 className={`draft-tile ${id === d.id ? "selected" : ""}`}
-                href={"/email?draft=" + d.id}
+                href={
+                  "/email?draft=" +
+                  d.id +
+                  ((d.domain || "finance") === "academic"
+                    ? "&domain=academic"
+                    : "")
+                }
               >
                 <div>
                   <FileText size={15} />
@@ -146,15 +169,18 @@ export default function EmailStudio() {
             <button
               className="button primary"
               disabled={busy}
-              onClick={() => void create()}
+              onClick={() => void create(null, null, domain)}
             >
               <Plus size={16} />
               {t("Create a draft", "创建草稿")}
             </button>
             <div className="writing-points">
-              <span>Networking</span>
-              <span>Informational Interview</span>
-              <span>Recruiting</span>
+              {(domain === "academic"
+                ? ["PhD Inquiry", "Research Internship", "Postdoc Inquiry"]
+                : ["Networking", "Informational Interview", "Recruiting"]
+              ).map((point) => (
+                <span key={point}>{point}</span>
+              ))}
             </div>
           </section>
         )}
@@ -444,10 +470,19 @@ export function DraftEditor({
         </div>
       </div>
     );
+  const draftDomain = draft.domain || "finance";
+  const domainContacts = contacts.filter(
+    (contact) => !!contact.domains[draftDomain],
+  );
+  const domainPersonas = personas.filter(
+    (persona) => (persona.domain || "finance") === draftDomain,
+  );
   const allContacts =
-    extra && !contacts.some((c) => c.id === extra.id)
-      ? [extra, ...contacts]
-      : contacts;
+    extra &&
+    !!extra.domains[draftDomain] &&
+    !domainContacts.some((c) => c.id === extra.id)
+      ? [extra, ...domainContacts]
+      : domainContacts;
   const recipient = allContacts.find((c) => c.id === draft.contact_id);
   const pending = jobs.some(
     (j) => j.status === "queued" || j.status === "running",
@@ -602,7 +637,7 @@ export function DraftEditor({
                 <option value="">
                   {t("No persona · use the brief", "不绑定画像 · 使用写作要求")}
                 </option>
-                {personas.map((p) => (
+                {domainPersonas.map((p) => (
                   <option value={p.id} key={p.id}>
                     {p.label} · v{p.version}
                   </option>
@@ -615,11 +650,26 @@ export function DraftEditor({
                   value={draft.starting_point}
                   onChange={(e) => edit({ starting_point: e.target.value })}
                 >
-                  <option>Networking</option>
-                  <option>Informational Interview</option>
-                  <option>Recruiting</option>
-                  <option>Follow-up</option>
-                  <option>Introduction</option>
+                  {(draftDomain === "academic"
+                    ? [
+                        "PhD Inquiry",
+                        "Research Masters Inquiry",
+                        "Research Internship",
+                        "Research Assistant",
+                        "Postdoc Inquiry",
+                        "Academic Collaboration",
+                        "Follow-up",
+                      ]
+                    : [
+                        "Networking",
+                        "Informational Interview",
+                        "Recruiting",
+                        "Follow-up",
+                        "Introduction",
+                      ]
+                  ).map((startingPoint) => (
+                    <option key={startingPoint}>{startingPoint}</option>
+                  ))}
                 </select>
               </Field>
             )}

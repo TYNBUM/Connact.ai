@@ -44,7 +44,7 @@ def budget(provider: str):
         calls.append(clock)
 
 
-def request_json(provider, method, url, key, **kwargs):
+def request_json(provider, method, url, key, *, allow_provider_error=False, **kwargs):
     if not key:
         raise HTTPException(
             503,
@@ -75,7 +75,9 @@ def request_json(provider, method, url, key, **kwargs):
                 f"{provider} returned HTTP {res.status_code}. Check API access, quota and filters. No mock fallback was used.",
             )
         data = res.json()
-        if not isinstance(data, dict) or data.get("error"):
+        if not isinstance(data, dict) or (
+            data.get("error") and not allow_provider_error
+        ):
             raise ValueError("Invalid provider result")
         return data
     except (httpx.HTTPError, ValueError):

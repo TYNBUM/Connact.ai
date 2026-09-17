@@ -143,7 +143,6 @@ function Shell() {
               >
                 <I size={18} />
                 <span>{t(String(en), String(zh))}</span>
-                {href === "/academic" && <span className="soon-dot" />}
               </Nav>
             );
           })}
@@ -211,8 +210,18 @@ function Shell() {
           </div>
           <div className="top-actions">
             <span className="domain-label">
-              <Landmark size={14} />
-              {path === "/academic" ? "Academic" : "Finance"}
+              {path === "/academic" ? (
+                <GraduationCap size={14} />
+              ) : path === "/finance" ? (
+                <Landmark size={14} />
+              ) : (
+                <Layers size={14} />
+              )}
+              {path === "/academic"
+                ? "Academic"
+                : path === "/finance"
+                  ? "Finance"
+                  : t("All domains", "全部领域")}
             </span>
             <span className="top-divider" />
             <button
@@ -288,7 +297,9 @@ function Shell() {
           ) : path === "/" ? (
             <Dashboard />
           ) : path === "/finance" ? (
-            <FinanceFlow />
+            <FinanceFlow key="finance" />
+          ) : path === "/academic" ? (
+            <FinanceFlow key="academic" domain="academic" />
           ) : path === "/personas" ? (
             <Personas />
           ) : path === "/people" ? (

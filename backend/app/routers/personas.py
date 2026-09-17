@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from typing import Literal
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from ..db import get_repo
 from ..config import settings
 from ..models import Persona, PersonaRevision, UploadedDocument, Draft
@@ -18,16 +19,38 @@ router = APIRouter()
 
 
 @router.get("/personas")
-def personas(repo=Depends(get_repo)):
-    return [row(p) for p in repo.all(Persona)]
+def personas(
+    domain: Literal["finance", "academic"] | None = Query(default=None),
+    repo=Depends(get_repo),
+):
+    conditions = [Persona.domain == domain] if domain else []
+    return [row(p) for p in repo.all(Persona, *conditions)]
+
+
+def attach_document(repo, persona, document_id):
+    if not document_id:
+        return
+    document = repo.get(UploadedDocument, document_id)
+    if document.domain != persona.domain:
+        raise HTTPException(
+            422, "The uploaded document and sender profile must use the same domain."
+        )
+    document.persona_id = persona.id
 
 
 @router.post("/personas")
 def create(body: PersonaInput, repo=Depends(get_repo)):
-    p = repo.add(Persona, label=body.label, data=body.data.model_dump())
-    repo.add(PersonaRevision, persona_id=p.id, version=p.version, data=p.data)
-    if body.document_id:
-        repo.get(UploadedDocument, body.document_id).persona_id = p.id
+    p = repo.add(
+        Persona, label=body.label, domain=body.domain, data=body.data.model_dump()
+    )
+    repo.add(
+        PersonaRevision,
+        persona_id=p.id,
+        domain=p.domain,
+        version=p.version,
+        data=p.data,
+    )
+    attach_document(repo, p, body.document_id)
     return row(p)
 
 
@@ -42,19 +65,33 @@ def update(id: str, body: PersonaInput, repo=Depends(get_repo)):
         raise HTTPException(
             409, "This persona changed elsewhere. Reopen it before editing."
         )
+    requested_domain = body.domain if "domain" in body.model_fields_set else p.domain
+    if requested_domain != p.domain:
+        raise HTTPException(
+            422, "A sender profile's domain cannot be changed after creation."
+        )
     p.label, p.data, p.version = body.label, body.data.model_dump(), p.version + 1
     for draft in repo.all(Draft, Draft.persona_id == p.id):
         draft.status = "draft"
         draft.revision += 1
-    repo.add(PersonaRevision, persona_id=p.id, version=p.version, data=p.data)
-    if body.document_id:
-        repo.get(UploadedDocument, body.document_id).persona_id = p.id
+    repo.add(
+        PersonaRevision,
+        persona_id=p.id,
+        domain=p.domain,
+        version=p.version,
+        data=p.data,
+    )
+    attach_document(repo, p, body.document_id)
     return row(p)
 
 
 @router.post("/documents/jobs", status_code=202)
-def upload_job(file: UploadFile = File(...), repo=Depends(get_repo)):
-    document = queue_document(repo, file)
+def upload_job(
+    file: UploadFile = File(...),
+    domain: Literal["finance", "academic"] = Form("finance"),
+    repo=Depends(get_repo),
+):
+    document = queue_document(repo, file, domain)
     response = document_response(document)
     repo.session.commit()
     wake_document_worker()
@@ -62,13 +99,17 @@ def upload_job(file: UploadFile = File(...), repo=Depends(get_repo)):
 
 
 @router.get("/documents")
-def documents(repo=Depends(get_repo)):
+def documents(
+    domain: Literal["finance", "academic"] | None = Query(default=None),
+    repo=Depends(get_repo),
+):
+    query = repo.query(UploadedDocument)
+    if domain:
+        query = query.where(UploadedDocument.domain == domain)
     return [
         document_response(document)
         for document in repo.session.scalars(
-            repo.query(UploadedDocument)
-            .order_by(UploadedDocument.created_at.desc())
-            .limit(50)
+            query.order_by(UploadedDocument.created_at.desc()).limit(50)
         ).all()
     ]
 
@@ -88,9 +129,13 @@ def retry_upload(id: str, repo=Depends(get_repo)):
 
 
 @router.post("/documents", deprecated=True)
-def upload(file: UploadFile = File(...), repo=Depends(get_repo)):
+def upload(
+    file: UploadFile = File(...),
+    domain: Literal["finance", "academic"] = Form("finance"),
+    repo=Depends(get_repo),
+):
     """Compatibility endpoint; the result now remains available after navigation."""
-    document = queue_document(repo, file)
+    document = queue_document(repo, file, domain)
     document_id = document.id
     repo.session.commit()
     process_document(document_id)
